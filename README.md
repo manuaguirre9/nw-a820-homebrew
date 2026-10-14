@@ -53,32 +53,50 @@ Sony, and patch it on your own computer.
 
 ## Installing
 
-> ⚠️ This flashes a modified firmware. It has worked repeatedly on the developer's unit and the official updater
-> restores stock firmware, but you do this at your own risk. Charge the battery first and don't unplug the Walkman
-> while it updates.
+> ⚠️ This flashes a modified firmware. It has worked repeatedly on the developer's unit and Sony's official firmware
+> can be put back at any time, but you do this at your own risk. Charge the battery first and don't unplug the
+> Walkman while it updates.
 
-Windows, Python 3 with `cryptography` (`pip install cryptography`), the Walkman connected by USB in Sony's UI:
-
-```bat
-sh build_all.sh                       :: or unzip a release so that build\HB exists
-python firmware\install.py --check    :: finds the Walkman, downloads Sony's updater, builds and checks everything
-python firmware\install.py            :: flashes the hook firmware if needed (about a minute), copies H:\HB
-```
+1. Download **`Walkman-Homebrew-Installer.exe`** from the [latest release](https://github.com/manuaguirre9/nw-a820-homebrew/releases).
+2. Open it. Windows will probably show a blue **"Windows protected your PC"** box, because the program isn't signed
+   with a paid certificate: click **More info**, then **Run anyway**.
+3. Connect the Walkman with its USB cable, in Sony's normal mode. The window finds it by itself and shows the model
+   and firmware.
+4. Tick the battery box and press the button. If your Walkman has an older firmware than Sony's last one (1.02), the
+   button first says **Step 1: update to 1.02**; after that it says **Install**. About two minutes each.
+5. When it says *Done*, unplug the Walkman. Hold **HOME for 3 seconds** to open the player (it asks for the
+   language the first time); HOME for 3 seconds again goes back to Sony's Walkman.
 
 The installer downloads Sony's official updater from Sony, takes the firmware out of it and patches it on your
 computer; every step is checked against known MD5s (the patched firmware is byte-for-byte the one tested on the
 developer's unit), so a changed or damaged download stops it before anything is flashed. It also builds the patched
-Bluetooth helper from that firmware and fetches `cacert.pem` for HTTPS. The first start of the player asks for the
-language.
+Bluetooth helper from that firmware and fetches `cacert.pem` for HTTPS. Run it again later to update the homebrew
+or to uninstall it.
 
-What it does by hand: `firmware/upgpack.py` unpacks the official `NW_WM_FW.UPG`, `firmware/build_hb.py` builds the
-hook firmware, `firmware/fwtrig.py go <md5>` makes the Walkman flash `H:\NW_WM_FW.UPG`, and `build/HB` is copied to
-`H:\HB`.
+**En español:** descargá `Walkman-Homebrew-Installer.exe`, abrilo (si Windows muestra "Windows protegió su PC":
+*Más información* → *Ejecutar de todos modos*), conectá el Walkman y seguí lo que dice la ventana. El instalador está
+en español si tu Windows lo está.
+
+<details><summary>From the command line (developers)</summary>
+
+Windows, Python 3 with `cryptography`, after `sh build_all.sh`:
+
+```bat
+python firmware\install.py --check      :: finds the Walkman, downloads Sony's updater, builds and checks everything
+python firmware\install.py --firmware   :: an older firmware: Sony's official 1.02 first
+python firmware\install.py              :: copies H:\HB, flashes the hook firmware if needed (about a minute)
+python firmware\build_installer.py      :: builds dist\Walkman-Homebrew-Installer.exe (pip install pyinstaller)
+```
+
+By hand: `firmware/upgpack.py` unpacks the official `NW_WM_FW.UPG`, `firmware/build_hb.py` builds the hook firmware,
+`firmware/fwtrig.py go <md5>` makes the Walkman flash `H:\NW_WM_FW.UPG`, and `build/HB` is copied to `H:\HB`.
+</details>
 
 ### Uninstalling
 
 - **Quick**: delete or rename `H:\HB\boot.sh`. The Walkman boots stock.
-- **Complete**: `python firmware\install.py --uninstall` flashes Sony's official firmware back; then delete `H:\HB`.
+- **Complete**: open the installer and press **Uninstall…** (or `python firmware\install.py --uninstall`). It flashes
+  Sony's official firmware back; then delete `H:\HB`.
 
 ### Where things go on the Walkman
 
@@ -142,7 +160,8 @@ The hook should apply unchanged, but:
 - `fwtrig.py` needs the Walkman to show up as a USB drive, which may not happen in MTP mode;
 - nobody has tried it on a real NWZ unit yet.
 
-If you have one and want to help test, open an issue.
+If you have one and want to help: open the installer with the Walkman connected, press **Save report** (it only reads
+information and changes nothing) and attach the `Walkman-report.txt` it leaves on your Desktop to a new issue.
 
 ## Repository layout
 

@@ -2,8 +2,10 @@
 #   python fwtrig.py info [DRIVE]           -> read-only: 0xFC 'dbmn' DEVINFO + DNK devinfo
 #   python fwtrig.py go <upg-md5> [DRIVE]   -> checks DRIVE\NW_WM_FW.UPG has that md5, then sends the
 #                                              0xFC 0x04 'dbmn' upgrade command (flags 0x80, then 0x00)
-# DRIVE defaults to H:. install.py uses devinfo() and trigger() from here.
-import ctypes, ctypes.wintypes as W, hashlib, os, sys
+# DRIVE defaults to H:. install.py and the installer window use devinfo(), is_walkman() and trigger() from here.
+import ctypes, ctypes.wintypes as W, hashlib, os, subprocess, sys
+
+LOG = print	# the installer window replaces it (a windowed program has no console)
 
 GENERIC_READ=0x80000000; GENERIC_WRITE=0x40000000; FILE_SHARE=3; OPEN_EXISTING=3
 IOCTL_SCSI_PASS_THROUGH_DIRECT=0x4D014; SCSI_IOCTL_DATA_IN=1
@@ -27,6 +29,22 @@ def openh(drive):
     if h in (ctypes.c_void_p(-1).value,-1): return None
     return h
 
+def is_walkman(drive):
+    """True if drive answers INQUIRY as a Sony Walkman (also in the homebrew player's USB mode, where the Sony
+    DEVINFO command may not answer)"""
+    h=openh(drive)
+    if not h: return False
+    try:
+        ok,st,sense,data,err=scsi(h,[0x12,0,0,0,36,0],36)
+        return bool(ok) and not st and data[8:36].startswith(b'SONY    WALKMAN')
+    finally:
+        k.CloseHandle(h)
+
+def flush(drive):
+    """write Windows' cached data for drive to the device now"""
+    subprocess.run(['powershell','-NoProfile','-Command','Write-VolumeCache -DriveLetter %s'%drive[0]],
+                   capture_output=True,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+
 def devinfo(drive):
     """{'vendor', 'product', 'rev', 'subrev'} of a Sony Walkman on drive, or None (not one, or no access)"""
     h=openh(drive)
@@ -44,16 +62,16 @@ def devinfo(drive):
 def trigger(drive, want_md5):
     """asks the Walkman on drive to flash DRIVE\\NW_WM_FW.UPG (must have want_md5); True if it accepted"""
     p=os.path.join(drive.rstrip('\\/')+'\\','NW_WM_FW.UPG')
-    md5=hashlib.md5(open(p,'rb').read()).hexdigest(); print('%s md5 %s size %d'%(p,md5,os.path.getsize(p)))
-    if md5!=want_md5: print('md5 mismatch, aborting'); return False
-    os.system('powershell -NoProfile -Command "Write-VolumeCache -DriveLetter %s" >nul 2>&1'%drive[0])
+    md5=hashlib.md5(open(p,'rb').read()).hexdigest(); LOG('%s md5 %s size %d'%(p,md5,os.path.getsize(p)))
+    if md5!=want_md5: LOG('md5 mismatch, aborting'); return False
+    flush(drive)
     h=openh(drive)
-    if not h: print('cannot open %s'%drive); return False
+    if not h: LOG('cannot open %s'%drive); return False
     try:
         for flags in (0x80,0x00):
             ok,st,sense,data,err=scsi(h,[0xFC,0,0x04,ord('d'),ord('b'),ord('m'),ord('n'),0,flags,0,0,0],0x80)
-            print('FC04 upgrade flags=0x%02x ok=%s st=%d sense=%s err=%d data=%s'%(flags,ok,st,sense[:3].hex(),err,data[:16].hex()))
-            if ok and st==0: print('accepted'); return True
+            LOG('FC04 upgrade flags=0x%02x ok=%s st=%d sense=%s err=%d data=%s'%(flags,ok,st,sense[:3].hex(),err,data[:16].hex()))
+            if ok and st==0: LOG('accepted'); return True
         return False
     finally:
         k.CloseHandle(h)

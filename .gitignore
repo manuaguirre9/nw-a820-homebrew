@@ -101,3 +101,7 @@ Thumbs.db
 # test outputs
 homebrew/tests/out/
 hbtest
+
+# the installer .exe (firmware/build_installer.py)
+dist/
+*.spec

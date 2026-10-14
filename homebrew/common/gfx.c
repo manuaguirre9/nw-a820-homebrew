@@ -176,8 +176,12 @@ int gfx_load_res(const char *resdir)
 	char p[512];
 	snprintf(p, sizeof p, "%s/dui_tex/dui_tex.dpk", resdir);
 	texdata = map_file(p, &texlen);
-	snprintf(p, sizeof p, "%s/dui_tex/ICX1115_home_anim.dpk", resdir);
+	snprintf(p, sizeof p, "%s/dui_tex/ICX1115_home_anim.dpk", resdir);	/* Japanese NW-A82x */
 	animdata = map_file(p, &animlen);
+	if (!animdata) {	/* international NWZ-A82x: same layout, its own icons */
+		snprintf(p, sizeof p, "%s/dui_tex/ICX1113_home_anim.dpk", resdir);
+		animdata = map_file(p, &animlen);
+	}
 	snprintf(p, sizeof p, "%s/font/dui_font.dpk", resdir);
 	fontdata = map_file(p, &fontlen);
 	if (fontdata && fontlen > 200) {
