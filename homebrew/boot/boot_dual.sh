@@ -22,6 +22,7 @@ mkdir -p /var/hb
 [ -f /var/hb/log.1.txt ] && cp /var/hb/log.1.txt $O/player_log.1.txt
 [ -f /var/hb/dspdec.log ] && cp /var/hb/dspdec.log $O/dspdec_player_log.txt
 [ -f /var/hb/gnuboy.log ] && cp /var/hb/gnuboy.log $O/gnuboy_log.txt
+[ -f /var/hb/hbwatch.log ] && cp /var/hb/hbwatch.log $O/hbwatch_log.txt
 [ -f /var/hb/usb.log ] && cp /var/hb/usb.log $O/usb_log.txt
 ls -la /var/hb /var/hb/bt > $O/var_hb.txt 2>&1
 # debug only (create an empty H:\HB\debug to enable): CPU / clock / interrupts / processes every 10 s to
