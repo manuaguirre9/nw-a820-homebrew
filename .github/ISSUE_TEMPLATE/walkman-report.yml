@@ -1,0 +1,68 @@
+name: My Walkman's report
+description: Share the report the installer saves, to help bring the homebrew to your model (international NWZ-A82x or any other Walkman).
+title: "Report: "
+labels: ["device report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping! The report only reads information from your Walkman; making it changes nothing on the device.
+
+        **How to get it:** open `Walkman-Homebrew-Installer.exe` (from the [latest release](https://github.com/manuaguirre9/nw-a820-homebrew/releases/latest)), connect your Walkman, press **Save report**. It saves `Walkman-report.txt` on your Desktop.
+
+        It contains your Walkman's model, firmware version and USB serial number, and the installer's log. Nothing personal.
+  - type: input
+    id: model
+    attributes:
+      label: Model
+      description: As printed on the Walkman or its box.
+      placeholder: "NWZ-A828"
+    validations:
+      required: true
+  - type: dropdown
+    id: region
+    attributes:
+      label: Where is it from?
+      options:
+        - United States / Canada
+        - Europe
+        - Japan
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: The version the Walkman shows in its own settings menu (often under Settings → Unit / Version information).
+      placeholder: "1.02"
+  - type: dropdown
+    id: usbmode
+    attributes:
+      label: Is there a USB connection mode option in the Walkman's menu?
+      description: Something like "MTP" or "Mass storage" / "MSC".
+      options:
+        - "No"
+        - "Yes"
+        - I don't know
+  - type: dropdown
+    id: thispc
+    attributes:
+      label: How does it show up in Windows' "This PC"?
+      options:
+        - As a drive letter (like E:)
+        - As a device with a media player icon
+        - It doesn't show up
+        - I don't know
+  - type: textarea
+    id: report
+    attributes:
+      label: The report
+      description: Drag `Walkman-report.txt` here, or paste its contents.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else?
+      description: Anything you noticed, or questions.

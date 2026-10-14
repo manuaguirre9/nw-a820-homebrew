@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Installing (step by step)
+    url: https://github.com/manuaguirre9/nw-a820-homebrew#installing
+    about: How to install, update and uninstall with Walkman-Homebrew-Installer.exe

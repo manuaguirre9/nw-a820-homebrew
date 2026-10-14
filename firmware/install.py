@@ -29,6 +29,7 @@ OFFICIAL_MD5 = 'fa3c6ae0152eb26c9ce94570735f0318'	# NW_WM_FW.UPG inside it: JP 1
 HOOK_MD5 = 'ee63d042897953614389f6224051275a'	# build_hb.build_hook(official): 1.02-41
 A2D_MD5 = '106ac24f1f4295a152788165fcb30fc4'	# patch_a2d.py on the official a2d_demo_app (the tested unit's)
 CACERT_URL = 'https://curl.se/ca/cacert.pem'
+VERSION = '0.2.1'	# this release of the homebrew; written to H:\HB\version.txt when it is copied
 MODELS = ('NW-A826', 'NW-A828', 'NW-A829')
 HOOK_SUBREV = '41'
 DEFAULT_HB = os.path.join(BUNDLE, 'HB') if FROZEN else os.path.join(HERE, '..', 'build', 'HB')
@@ -239,9 +240,27 @@ def copy_homebrew(drive, hb, a2d):
             say('(no cacert.pem: %s; podcasts will use HTTPS without checking certificates)' % e)
     for f in ('Music', 'Audiolibros', 'Podcasts', 'Juegos'):
         os.makedirs(os.path.join(drive + '\\', f), exist_ok=True)
+    open(os.path.join(dst, 'version.txt'), 'w').write(VERSION + '\n')	# so the installer can tell when there is something newer
     fwtrig.flush(drive)
     say('%d files copied to %s' % (n + 1, dst))
     return n + 1
+
+
+def installed_version(drive):
+    """the homebrew release on the Walkman (H:\\HB\\version.txt), or None (none, or older than 0.2.1, which had no file)"""
+    try:
+        v = open(os.path.join(drive + '\\', 'HB', 'version.txt'), encoding='utf-8').read().strip()
+        return v if v and len(v) < 32 else None
+    except OSError:
+        return None
+
+
+def version_key(v):
+    """'0.2.1' -> (0, 2, 1) for comparing; anything unreadable sorts as the oldest"""
+    try:
+        return tuple(int(x) for x in v.split('.'))
+    except (AttributeError, ValueError):
+        return ()
 
 
 def disable_homebrew(drive):

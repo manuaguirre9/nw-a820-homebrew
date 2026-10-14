@@ -70,8 +70,8 @@ Sony, and patch it on your own computer.
 The installer downloads Sony's official updater from Sony, takes the firmware out of it and patches it on your
 computer; every step is checked against known MD5s (the patched firmware is byte-for-byte the one tested on the
 developer's unit), so a changed or damaged download stops it before anything is flashed. It also builds the patched
-Bluetooth helper from that firmware and fetches `cacert.pem` for HTTPS. Run it again later to update the homebrew
-or to uninstall it.
+Bluetooth helper from that firmware and fetches `cacert.pem` for HTTPS. Run a newer installer later to update the
+homebrew (it says when your Walkman is already up to date), or any installer to uninstall it.
 
 **En español:** descargá `Walkman-Homebrew-Installer.exe`, abrilo (si Windows muestra "Windows protegió su PC":
 *Más información* → *Ejecutar de todos modos*), conectá el Walkman y seguí lo que dice la ventana. El instalador está
@@ -160,8 +160,10 @@ The hook should apply unchanged, but:
 - `fwtrig.py` needs the Walkman to show up as a USB drive, which may not happen in MTP mode;
 - nobody has tried it on a real NWZ unit yet.
 
-If you have one and want to help: open the installer with the Walkman connected, press **Save report** (it only reads
-information and changes nothing) and attach the `Walkman-report.txt` it leaves on your Desktop to a new issue.
+If you have one, or another Walkman you'd like to see supported, and want to help: open the installer with the Walkman
+connected and press **Save report** (it only reads information and changes nothing). It saves `Walkman-report.txt`
+on your Desktop and offers to open the [report form](https://github.com/manuaguirre9/nw-a820-homebrew/issues/new?template=walkman-report.yml);
+drag the file into it.
 
 ## Repository layout
 

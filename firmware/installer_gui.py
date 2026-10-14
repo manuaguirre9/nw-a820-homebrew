@@ -1,8 +1,9 @@
 """The installer window (Walkman-Homebrew-Installer.exe): for people who are not developers. It watches for the
 Walkman, says plainly what it found, allows only the step that makes sense (Sony's official 1.02 first, then the
 homebrew), and runs the same checked steps as install.py. Spanish or English after Windows' language.
-International NWZ-A82x units get a read-only diagnostic report instead."""
-import ctypes, datetime, os, platform, queue, subprocess, sys, threading, time, traceback
+International NWZ-A82x units and any other Sony Walkman get a read-only diagnostic report instead, which the
+window offers to share as a GitHub issue."""
+import ctypes, datetime, os, platform, queue, subprocess, sys, threading, time, traceback, webbrowser
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -10,9 +11,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import install as I
 import fwtrig
 
-VERSION = '0.2.0'
+VERSION = I.VERSION
 JP_PIDS = ('035D', '0324')	# NW-A82x mass storage / rescue mode
 INTL_PIDS = ('035B', '035C')	# NWZ-A82x (MTP)
+REPORT_URL = 'https://github.com/manuaguirre9/nw-a820-homebrew/issues/new?template=walkman-report.yml'
 
 ES = (ctypes.windll.kernel32.GetUserDefaultUILanguage() & 0x3ff) == 0x0a
 T = {
@@ -35,18 +37,28 @@ T = {
     'nodrive_d': ('Windows todavía no muestra su memoria. Esperá unos segundos; si no aparece, desconectalo y volvé a conectarlo.',
                   "Windows doesn't show its storage yet. Wait a few seconds; if it doesn't appear, unplug it and connect it again."),
     'intl_t': ('Modelo internacional (NWZ-A82x)', 'International model (NWZ-A82x)'),
-    'intl_d': ('Este modelo todavía no está soportado. Podés ayudar a que lo esté: tocá "Guardar informe" y compartilo en GitHub o Reddit. El informe solo lee datos; no cambia nada del Walkman.',
-               "This model isn't supported yet. You can help: press \"Save report\" and share it on GitHub or Reddit. The report only reads information; it changes nothing on the Walkman."),
-    'other_t': ('Este Walkman no es compatible', "This Walkman isn't supported"),
-    'other_d': ('Detecté un %s. El homebrew funciona en el NW-A826, NW-A828 y NW-A829.',
-                'Found a %s. The homebrew works on the NW-A826, NW-A828 and NW-A829.'),
+    'intl_d': ('Este modelo todavía no está soportado. Podés ayudar a que lo esté: tocá "Guardar informe" y compartilo en GitHub. El informe solo lee datos; no cambia nada del Walkman.',
+               "This model isn't supported yet. You can help: press \"Save report\" and share it on GitHub. The report only reads information; it changes nothing on the Walkman."),
+    'other_t': ('%s: todavía no es compatible', "%s: not supported yet"),
+    'other_d': ('Por ahora el homebrew funciona en el NW-A826, NW-A828 y NW-A829. Podés ayudar a que funcione en el tuyo: tocá "Guardar informe" y compartilo en GitHub. El informe solo lee datos; no cambia nada del Walkman.',
+                'For now the homebrew works on the NW-A826, NW-A828 and NW-A829. You can help bring it to yours: press "Save report" and share it on GitHub. The report only reads information; it changes nothing on the Walkman.'),
+    'sony_t': ('Walkman detectado: modelo todavía no compatible', "Walkman found: this model isn't supported yet"),
+    'sony_d': ('Detecté un dispositivo Sony (%s). Podés ayudar a que el homebrew funcione en él: tocá "Guardar informe" y compartilo en GitHub. El informe solo lee datos; no cambia nada del dispositivo.',
+               'Found a Sony device (%s). You can help bring the homebrew to it: press "Save report" and share it on GitHub. The report only reads information; it changes nothing on the device.'),
     'old_t': ('%s · firmware %s', '%s · firmware %s'),
     'old_d': ('Primero hay que actualizarlo al firmware oficial 1.02 de Sony. El instalador lo hace por vos: lo descarga de Sony y lo instala (unos 2 minutos).',
               "First it needs Sony's official firmware 1.02. The installer does it for you: it downloads it from Sony and installs it (about 2 minutes)."),
     'ready_t': ('%s · firmware 1.02', '%s · firmware 1.02'),
     'ready_d': ('Todo listo para instalar. Tarda unos 2 minutos.', 'Ready to install. It takes about 2 minutes.'),
     'hook_t': ('%s · homebrew instalado', '%s · homebrew installed'),
-    'hook_d': ('Podés actualizar el homebrew a esta versión (%s) o desinstalarlo.', 'You can update the homebrew to this version (%s) or uninstall it.'),
+    'hook_d': ('Hay una versión nueva del homebrew: %s → %s. Podés actualizarlo, o desinstalarlo.', 'A new version of the homebrew is here: %s → %s. You can update it, or uninstall it.'),
+    'hook_d_old': ('Hay una versión nueva del homebrew (%s). Podés actualizarlo, o desinstalarlo.', 'A new version of the homebrew is here (%s). You can update it, or uninstall it.'),
+    'current_t': ('%s · homebrew al día', '%s · homebrew up to date'),
+    'current_d': ('Tiene la última versión (%s). No hay nada para actualizar. Ya podés desconectarlo.', "It has the latest version (%s). There's nothing to update. You can unplug it."),
+    'newer_t': ('%s · homebrew más nuevo que este instalador', '%s · homebrew newer than this installer'),
+    'newer_d': ('El Walkman tiene la versión %s y este instalador trae la %s. Descargá el instalador más reciente desde GitHub.',
+                'The Walkman has version %s and this installer has %s. Download the latest installer from GitHub.'),
+    'b_uptodate': ('Al día', 'Up to date'),
     'b_firmware': ('Paso 1: actualizar a 1.02', 'Step 1: update to 1.02'),
     'b_install': ('Instalar', 'Install'),
     'b_update': ('Actualizar homebrew', 'Update homebrew'),
@@ -73,7 +85,8 @@ T = {
     'confirm_uninstall': ('Esto vuelve a instalar el firmware oficial de Sony (unos 2 minutos) y desactiva el homebrew. ¿Seguir?',
                           "This puts Sony's official firmware back (about 2 minutes) and turns the homebrew off. Continue?"),
     'confirm_close': ('El Walkman se está actualizando. Esperá a que termine antes de cerrar.', 'The Walkman is updating. Wait until it finishes before closing.'),
-    'report_saved': ('Informe guardado en el Escritorio:\n%s', 'Report saved on the Desktop:\n%s'),
+    'report_saved': ('Informe guardado en el Escritorio:\n%s\n\n¿Abrir GitHub para compartirlo? Se abre un formulario; arrastrá ahí el archivo. (Necesitás una cuenta de GitHub, que es gratis.)',
+                     'Report saved on the Desktop:\n%s\n\nOpen GitHub to share it? A form opens; drag the file into it. (You need a GitHub account, which is free.)'),
 }
 
 
@@ -90,9 +103,9 @@ def desktop():
 
 
 def sony_usb():
-    """the Sony USB devices Windows sees now: [(pid, name, class, id)]"""
+    """the Sony USB devices Windows sees now: [(pid, name, class, id, manufacturer, service)]"""
     ps = ("Get-CimInstance Win32_PnPEntity | Where-Object { $_.DeviceID -like '*VID_054C*' -or $_.Name -like '*WALKMAN*' } | "
-          "ForEach-Object { $_.DeviceID + '|' + $_.Name + '|' + $_.PNPClass }")
+          "ForEach-Object { $_.DeviceID + '|' + $_.Name + '|' + $_.PNPClass + '|' + $_.Manufacturer + '|' + $_.Service }")
     try:
         r = subprocess.run(['powershell', '-NoProfile', '-Command', ps], capture_output=True, text=True, timeout=20,
                            creationflags=I.NO_WINDOW)
@@ -103,9 +116,17 @@ def sony_usb():
         p = line.strip().split('|')
         if len(p) < 3:
             continue
+        p += [''] * (5 - len(p))
         pid = p[0].upper().split('PID_')[1][:4] if 'PID_' in p[0].upper() else ''
-        out.append((pid, p[1], p[2], p[0]))
+        out.append((pid, p[1], p[2], p[0], p[3], p[4]))
     return out
+
+
+def portable(dev):
+    """a Sony device that can be a Walkman: a media player (MTP), a disk, or anything named WALKMAN (not a PlayStation
+    controller or a pair of headphones, which carry Sony's vendor id too)"""
+    pid, name, cls = dev[0], dev[1], dev[2]
+    return cls in ('WPD', 'DiskDrive') or 'WALKMAN' in name.upper() or name.upper().startswith(('NW-', 'NWZ-'))
 
 
 class App:
@@ -175,7 +196,8 @@ class App:
             self.steps.append(mark)
 
         self.battery = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text=tr('battery'), variable=self.battery).pack(anchor='w', pady=(6, 10))
+        self.cb = ttk.Checkbutton(f, text=tr('battery'), variable=self.battery)	# hidden when only a report is possible
+        self.cb.pack(anchor='w', pady=(6, 10))
 
         self.progbox = ttk.Frame(f)	# shown only while working
         self.progbox.pack(fill='x')
@@ -219,12 +241,17 @@ class App:
         for mark, ok in zip(self.steps, (a, b, c)):
             mark.config(text='✔' if ok else '○', fg='#1e8e3e' if ok else '#9aa3ad')
 
-    def main_button(self, key=None):
+    def main_button(self, key=None, label=None):
+        """the big button runs key's action; without one it is greyed out, showing label (default "Install")"""
         self.action = key
+        if key == 'b_report':
+            self.cb.pack_forget()
+        elif not self.cb.winfo_ismapped():
+            self.cb.pack(anchor='w', pady=(6, 10), before=self.progbox)
         if key:
             self.b_main.config(text=tr(key), state='normal')
         else:
-            self.b_main.config(text=tr('b_install'), state='disabled')
+            self.b_main.config(text=tr(label or 'b_install'), state='disabled')
 
     # ---------- what is connected ----------
     def watch(self):
@@ -239,24 +266,34 @@ class App:
                 n += 1
             time.sleep(2)
 
+    def usb(self, n, force=False):
+        """the Sony device list, asked every other round (it is slower) unless force"""
+        if force or n % 2 == 0 or not hasattr(self, 'last_usb'):
+            self.last_usb = sony_usb()
+        return self.last_usb
+
     def detect(self, n):
         d, info = I.scan()
         if info:
-            return {'kind': 'walkman', 'drive': d, 'info': info}
-        if d:
-            return {'kind': 'hbmode', 'drive': d}
-        if n % 2 == 0:	# the device list is slower to ask: every other round
-            usb = sony_usb()
-            self.last_usb = usb
-            pids = {p[0] for p in usb}
-            if pids & set(INTL_PIDS):
-                return {'kind': 'intl'}
-            if pids & set(JP_PIDS):
-                return {'kind': 'nodrive'}
-        elif getattr(self, 'last_usb', None):
-            pids = {p[0] for p in self.last_usb}
-            if pids & set(INTL_PIDS):
-                return {'kind': 'intl'}
+            return {'kind': 'walkman', 'drive': d, 'info': info, 'hbver': I.installed_version(d)}
+        usb = self.usb(n, force=bool(d))
+        pids = {p[0] for p in usb}
+        if d:	# answers as a Walkman but not to Sony's DEVINFO: the player's USB mode on a Japanese unit, or another model
+            if pids & set(JP_PIDS) or not usb:
+                return {'kind': 'hbmode', 'drive': d}
+            q = fwtrig.inquiry(d)
+            return {'kind': 'sony', 'name': q['product'] if q else d}
+        for dr in I.drives():	# another Sony player that shows up as a drive
+            q = fwtrig.inquiry(dr)
+            if q and q['vendor'] == 'SONY' and ('WALKMAN' in q['product'].upper() or q['product'].upper().startswith('NW')):
+                return {'kind': 'sony', 'name': q['product']}
+        if pids & set(INTL_PIDS):
+            return {'kind': 'intl'}
+        if pids & set(JP_PIDS):
+            return {'kind': 'nodrive'}
+        port = [p for p in usb if portable(p)]
+        if port:	# a Sony media player Windows sees (MTP) that is none of the above
+            return {'kind': 'sony', 'name': port[0][1] or 'PID %s' % port[0][0]}
         return {'kind': 'none'}
 
     def show_state(self, s):
@@ -273,18 +310,28 @@ class App:
         elif k == 'nodrive':
             self.status('#e8a33d', tr('nodrive_t'), tr('nodrive_d')); self.set_steps(1, 0, 0); self.main_button(None)
         elif k == 'intl':
-            self.status('#e8a33d', tr('intl_t'), tr('intl_d')); self.set_steps(1, 0, 0); self.main_button(None)
+            self.status('#e8a33d', tr('intl_t'), tr('intl_d')); self.set_steps(1, 0, 0); self.main_button('b_report')
+        elif k == 'sony':
+            self.status('#e8a33d', tr('sony_t'), tr('sony_d', s['name'])); self.set_steps(1, 0, 0); self.main_button('b_report')
         else:
             info = s['info']
             name = info['product']
             if name.startswith('NWZ'):
-                self.status('#e8a33d', tr('intl_t'), tr('intl_d')); self.set_steps(1, 0, 0); self.main_button(None)
+                self.status('#e8a33d', tr('intl_t'), tr('intl_d')); self.set_steps(1, 0, 0); self.main_button('b_report')
             elif name not in I.MODELS:
-                self.status('#d93025', tr('other_t'), tr('other_d', name)); self.set_steps(1, 0, 0); self.main_button(None)
+                self.status('#e8a33d', tr('other_t', name), tr('other_d')); self.set_steps(1, 0, 0); self.main_button('b_report')
             elif info['rev'] != '1.02':
                 self.status('#e8a33d', tr('old_t', name, info['rev']), tr('old_d')); self.set_steps(1, 0, 0); self.main_button('b_firmware')
-            elif info['subrev'] == I.HOOK_SUBREV:
-                self.status('#1e8e3e', tr('hook_t', name), tr('hook_d', VERSION)); self.set_steps(1, 1, 1); self.main_button('b_update')
+            elif info['subrev'] == I.HOOK_SUBREV:	# installed: update only to something newer than what it has
+                have, mine = s.get('hbver'), I.version_key(VERSION)
+                if have and I.version_key(have) == mine:
+                    self.status('#1e8e3e', tr('current_t', name), tr('current_d', have)); self.main_button(None, 'b_uptodate')
+                elif have and I.version_key(have) > mine:
+                    self.status('#e8a33d', tr('newer_t', name), tr('newer_d', have, VERSION)); self.main_button(None, 'b_uptodate')
+                else:	# older, or from before the version file (0.2.0 and earlier)
+                    self.status('#1e8e3e', tr('hook_t', name), tr('hook_d', have, VERSION) if have else tr('hook_d_old', VERSION))
+                    self.main_button('b_update')
+                self.set_steps(1, 1, 1)
                 self.b_uninstall.pack(side='right', padx=8)
             else:
                 self.status('#1e8e3e', tr('ready_t', name), tr('ready_d')); self.set_steps(1, 1, 0); self.main_button('b_install')
@@ -295,6 +342,8 @@ class App:
     def on_main(self):
         if self.busy or not self.state or not self.action:
             return
+        if self.action == 'b_report':	# models we can't install on yet: the main button is the report
+            self.on_report(); return
         if not self.battery.get():
             messagebox.showinfo(tr('title'), tr('need_battery')); return
         self.run(self.action, self.state['drive'], self.state['info'])
@@ -362,12 +411,18 @@ class App:
         """read-only: what Windows sees of the Walkman, for an issue on GitHub / a Reddit post"""
         lines = ['Walkman Homebrew installer %s report, %s' % (VERSION, datetime.datetime.now().isoformat(timespec='seconds')),
                  'Windows: %s' % platform.platform(), '', 'Sony USB devices (Windows device list):']
-        for pid, name, cls, did in sony_usb():
-            lines.append('  PID %s  %s  [%s]  %s' % (pid or '-', name, cls, did))
+        for pid, name, cls, did, maker, svc in sony_usb():
+            lines.append('  PID %s  %s  [%s]  maker=%s  service=%s  %s' % (pid or '-', name, cls, maker, svc, did))
         lines += ['', 'Drives:']
         for d in I.drives():
+            q = fwtrig.inquiry(d)
             info = fwtrig.devinfo(d)
-            lines.append('  %s  walkman=%s  devinfo=%s' % (d, fwtrig.is_walkman(d), info))
+            hbver = ''
+            try:
+                hbver = open(os.path.join(d + '\\', 'HB', 'version.txt'), encoding='utf-8').read().strip()
+            except OSError:
+                pass
+            lines.append('  %s  inquiry=%s  devinfo=%s%s' % (d, q, info, '  homebrew=%s' % hbver if hbver else ''))
         lines += ['', 'Installer log (last lines):']
         try:
             lines += open(os.path.join(I.DEFAULT_CACHE, 'installer.log'), encoding='utf-8').read().splitlines()[-60:]
@@ -408,13 +463,14 @@ class App:
                     self.finish()
                     self.log('ERROR: %s' % ev[1])
                     self.status('#d93025', tr('err_t'), ev[1] + '\n' + tr('err_more'))
-                elif kind == 'report':
+                elif kind == 'report':	# show the file, and offer GitHub's report form to drop it into
                     self.log('report: %s' % ev[1])
-                    messagebox.showinfo(tr('title'), tr('report_saved', ev[1]))
                     try:
                         os.startfile(ev[1])
                     except OSError:
                         pass
+                    if messagebox.askyesno(tr('title'), tr('report_saved', ev[1])):
+                        webbrowser.open(REPORT_URL)
         except queue.Empty:
             pass
         self.root.after(100, self.pump)

@@ -29,6 +29,18 @@ def openh(drive):
     if h in (ctypes.c_void_p(-1).value,-1): return None
     return h
 
+def inquiry(drive):
+    """{'vendor', 'product', 'rev'} from a standard SCSI INQUIRY (any USB disk), or None"""
+    h=openh(drive)
+    if not h: return None
+    try:
+        ok,st,sense,data,err=scsi(h,[0x12,0,0,0,36,0],36)
+        if not ok or st: return None
+        t=lambda b: b.decode('latin1').strip('\0 ')
+        return {'vendor':t(data[8:16]),'product':t(data[16:32]),'rev':t(data[32:36])}
+    finally:
+        k.CloseHandle(h)
+
 def is_walkman(drive):
     """True if drive answers INQUIRY as a Sony Walkman (also in the homebrew player's USB mode, where the Sony
     DEVINFO command may not answer)"""

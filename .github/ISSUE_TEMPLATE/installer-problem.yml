@@ -1,0 +1,36 @@
+name: Problem with the installer or the player
+description: Something didn't work while installing, updating or using the homebrew.
+title: "Problem: "
+labels: ["problem"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Sorry it didn't work! A few details help a lot.
+
+        If your Walkman seems stuck: unplug it and press the **RESET** pinhole (a paperclip works). To go back to Sony's firmware at any time, open the installer and press **Uninstall…**.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what you saw instead. Exact messages help.
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Walkman model
+      placeholder: "NW-A829"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Installer version
+      description: Shown in the report's first line, or the release you downloaded.
+      placeholder: "0.2.1"
+  - type: textarea
+    id: report
+    attributes:
+      label: The installer's report
+      description: In the installer, press **Save report** and drag `Walkman-report.txt` here (it includes the installer's log).
