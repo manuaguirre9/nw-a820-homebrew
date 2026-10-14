@@ -1,0 +1,563 @@
+<title>Bitácora NW-A829</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: una columna de lectura (~68ch) con barra plateada estilo Walkman arriba; la línea de tiempo es el eje; galería en grilla de pantallas 240x320 */
+:root{
+  --bg:#e8ebef; --surface:#f6f7f9; --ink:#142030; --muted:#566476; --line:#c8cfd8;
+  --accent:#c25a00; --accent-fill:#f08a1c; --accent-ink:#1a0e00; --blue:#1f3f9a;
+  --ok:#1d7a45; --ok-bg:#dcefe3; --warn:#8a5a00; --warn-bg:#f7e8c8; --no:#8c2f2f; --no-bg:#f3dddd; --idea:#3b4fa8; --idea-bg:#e0e5f6;
+  --silver-1:#f4f6f8; --silver-2:#b9c0c9; --silver-ink:#2b3440;
+  --code-bg:#dfe4ea;
+  --f-display:"M PLUS Rounded 1c","Arial Rounded MT Bold","Segoe UI",sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",Consolas,"Courier New",monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f151e; --surface:#17202c; --ink:#e4e9f0; --muted:#94a2b4; --line:#2a3647;
+  --accent:#ff9c38; --accent-fill:#f08a1c; --accent-ink:#1a0e00; --blue:#6f93ee;
+  --ok:#6fd39a; --ok-bg:#163526; --warn:#f2c066; --warn-bg:#3a2d12; --no:#f09a9a; --no-bg:#3a1c1c; --idea:#a9b8f5; --idea-bg:#1e2648;
+  --silver-1:#c9d0d8; --silver-2:#7d8794; --silver-ink:#10161e;
+  --code-bg:#222c3a; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0f151e; --surface:#17202c; --ink:#e4e9f0; --muted:#94a2b4; --line:#2a3647;
+  --accent:#ff9c38; --accent-fill:#f08a1c; --accent-ink:#1a0e00; --blue:#6f93ee;
+  --ok:#6fd39a; --ok-bg:#163526; --warn:#f2c066; --warn-bg:#3a2d12; --no:#f09a9a; --no-bg:#3a1c1c; --idea:#a9b8f5; --idea-bg:#1e2648;
+  --silver-1:#c9d0d8; --silver-2:#7d8794; --silver-ink:#10161e;
+  --code-bg:#222c3a; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.6;margin:0}
+.wrap{max-width:1040px;margin:0 auto;padding-inline:20px;padding-block:0 64px}
+.read{max-width:70ch}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;line-height:1.2;margin:0}
+h2{font-size:1.65rem;font-weight:800}
+h3{font-size:1.12rem;font-weight:700}
+p{margin:0}
+a{color:var(--accent)}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--code-bg);padding:.08em .35em;border-radius:3px;overflow-wrap:anywhere}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* Barra de título plateada, como la del Walkman */
+.titlebar{background:linear-gradient(var(--silver-1),var(--silver-2));color:var(--silver-ink);text-align:center;
+  font-family:var(--f-display);font-weight:700;font-size:15px;letter-spacing:.04em;padding:5px 12px;border-bottom:2px solid var(--blue)}
+header.hero{padding-block:40px 28px;display:grid;gap:18px}
+.eyebrow{font-family:var(--f-mono);font-size:12.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+.hero h1{font-size:clamp(2rem,5.4vw,3.4rem);font-weight:800;letter-spacing:-.01em}
+.hero h1 .sel{background:var(--accent-fill);color:var(--accent-ink);padding:0 .22em;border-radius:4px;box-decoration-break:clone;-webkit-box-decoration-break:clone}
+.lede{font-size:1.15rem;color:var(--ink);max-width:62ch}
+.lede-sub{color:var(--muted);max-width:66ch}
+
+nav.toc{display:flex;flex-wrap:wrap;gap:6px;padding-block:6px 0}
+nav.toc a{font-family:var(--f-display);font-weight:700;font-size:14px;text-decoration:none;color:var(--ink);background:var(--surface);
+  border:1px solid var(--line);padding:5px 11px;border-radius:4px}
+nav.toc a:hover{background:var(--accent-fill);color:var(--accent-ink);border-color:var(--accent-fill)}
+
+section{padding-block:44px 0;display:grid;gap:18px}
+.sec-head{display:grid;gap:6px}
+.sec-head .eyebrow{color:var(--accent)}
+
+/* Cifras */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.stat{background:var(--surface);padding:14px 16px;display:grid;gap:2px;align-content:start}
+.stat b{font-family:var(--f-display);font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15}
+.stat span{color:var(--muted);font-size:13.5px;line-height:1.4}
+
+/* Estado actual */
+.now{background:var(--surface);border:1px solid var(--line);border-left:6px solid var(--accent-fill);border-radius:6px;padding:18px 20px;display:grid;gap:10px}
+.boot{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-family:var(--f-mono);font-size:13px}
+.boot span{background:var(--code-bg);padding:4px 8px;border-radius:3px}
+.boot i{font-style:normal;color:var(--muted)}
+
+/* Chips de estado */
+.chip{display:inline-block;font-family:var(--f-mono);font-size:11.5px;font-weight:500;letter-spacing:.03em;padding:1px 7px;border-radius:3px;white-space:nowrap;vertical-align:2px}
+.ok{background:var(--ok-bg);color:var(--ok)}
+.warn{background:var(--warn-bg);color:var(--warn)}
+.no{background:var(--no-bg);color:var(--no)}
+.idea{background:var(--idea-bg);color:var(--idea)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;color:var(--muted);font-size:13.5px}
+
+/* Línea de tiempo */
+.phase{display:grid;gap:14px;padding-block:8px 0}
+.phase-title{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;border-bottom:2px solid var(--ink);padding-bottom:6px}
+.phase-title h3{font-size:1.3rem}
+.phase-title .dates{font-family:var(--f-mono);font-size:13px;color:var(--muted)}
+.tl{list-style:none;margin:0;padding:0;display:grid;gap:0}
+.tl li{display:grid;grid-template-columns:96px 1fr;gap:16px;padding-block:12px;border-bottom:1px solid var(--line)}
+.tl li:last-child{border-bottom:0}
+.tl time{font-family:var(--f-mono);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;padding-top:2px}
+.tl .body{min-width:0;display:grid;gap:5px}
+.tl .body h4{font-family:var(--f-body);font-weight:600;font-size:1rem;margin:0}
+.tl .body p{color:var(--ink);max-width:70ch}
+.tl .body p.note{color:var(--muted);font-size:14.5px}
+.quote{font-style:italic;color:var(--accent)}
+
+/* Logros por área */
+.areas{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px}
+.area{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px 18px;display:grid;gap:10px;align-content:start;min-width:0}
+.area h3{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.area h3 small{font-family:var(--f-mono);font-size:12px;font-weight:400;color:var(--muted)}
+.area ul{margin:0;padding-left:18px;display:grid;gap:5px;font-size:15px}
+
+/* Listas de pendientes */
+.todo{display:grid;gap:0;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.todo .row{display:grid;grid-template-columns:150px 1fr;gap:14px;padding:12px 16px;border-bottom:1px solid var(--line);align-items:start}
+.todo .row:last-child{border-bottom:0}
+.todo .row > div{min-width:0}
+.todo .row b{font-weight:600}
+.todo .row p{color:var(--muted);font-size:14.5px;margin-top:2px}
+.todo .tag{padding-top:2px}
+
+/* Galería */
+.gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:18px}
+figure{margin:0;display:grid;gap:6px;min-width:0}
+figure img{width:100%;height:auto;aspect-ratio:3/4;image-rendering:pixelated;border-radius:4px;border:3px solid #1b1f26;background:#000;display:block}
+figcaption{font-size:13.5px;color:var(--muted);line-height:1.35}
+.compare img{width:100%;border-radius:6px;border:1px solid var(--line);display:block}
+
+/* Callejones */
+.dead{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.dead div{border-top:3px solid var(--no);padding-top:10px;display:grid;gap:4px;min-width:0}
+.dead p{font-size:14.5px;color:var(--muted)}
+
+/* Herramientas */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;min-width:620px}
+th,td{text-align:left;padding:9px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--f-display);font-weight:700;font-size:13px;letter-spacing:.04em;color:var(--muted)}
+tr:last-child td{border-bottom:0}
+td:first-child{font-family:var(--f-mono);font-size:13px;white-space:nowrap}
+
+.rules{margin:0;padding-left:20px;display:grid;gap:8px;max-width:72ch}
+footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+
+@media (max-width:620px){
+  .tl li{grid-template-columns:1fr;gap:4px}
+  .todo .row{grid-template-columns:1fr;gap:4px}
+  body{font-size:15.5px}
+}
+</style>
+
+<div class="titlebar">Inicio</div>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="eyebrow">Sony NW-A829 · Japón, 2008 · 16 GB · 16–30 sep 2026</div>
+  <h1>Bitácora del <span class="sel">Walkman</span></h1>
+  <p class="lede">Un Walkman japonés que sólo aceptaba música cargada con SonicStage terminó corriendo un reproductor propio con audiolibros, podcasts que se bajan solos por el teléfono, el DSP de Sony, juegos y modo foco. Esta es la historia completa: qué probamos, qué funcionó, qué no y qué falta.</p>
+  <p class="lede-sub">Todo se hizo sin tocar las claves de DRM del equipo y manteniendo siempre el firmware de Sony como arranque de respaldo.</p>
+  <nav class="toc" aria-label="Secciones">
+    <a href="#hoy">Estado actual</a>
+    <a href="#historia">Historia</a>
+    <a href="#logros">Logros</a>
+    <a href="#pantallas">Pantallas</a>
+    <a href="#testear">Por testear</a>
+    <a href="#ideas">Por lograr</a>
+    <a href="#descartado">Descartado</a>
+    <a href="#herramientas">Herramientas</a>
+    <a href="#lecciones">Lecciones</a>
+  </nav>
+</header>
+
+<div class="stats" role="list">
+  <div class="stat" role="listitem"><b>15 días</b><span>de trabajo, del 16 al 30 de septiembre</span></div>
+  <div class="stat" role="listitem"><b>1.02-41</b><span>firmware oficial JP + gancho de arranque + parche de 3 bytes</span></div>
+  <div class="stat" role="listitem"><b>1 → 131 KB/s</b><span>descarga por Bluetooth del teléfono, después de encontrar el cuello de botella</span></div>
+  <div class="stat" role="listitem"><b>4,6×</b><span>tiempo real: MP3 decodificado en el DSP oculto de Sony</span></div>
+  <div class="stat" role="listitem"><b>3,7 s</b><span>arranque de nuestro reproductor (Sony tarda 4,4 s)</span></div>
+  <div class="stat" role="listitem"><b>20,8 MB</b><span>de RAM total, CPU ARM926 a 83/124/248 MHz</span></div>
+</div>
+
+<!-- ============ ESTADO ACTUAL ============ -->
+<section id="hoy">
+  <div class="sec-head">
+    <div class="eyebrow">Al 30 de septiembre</div>
+    <h2>Cómo está el Walkman hoy</h2>
+  </div>
+  <div class="now read">
+    <p>El equipo corre el <b>firmware oficial japonés 1.02</b> con dos cambios mínimos: un gancho que ejecuta <code>H:\HB\boot.sh</code> antes de la interfaz de Sony, y un parche de 3 bytes que elimina el aviso de “Simple Mode”. Si se borra la carpeta <code>HB</code>, arranca exactamente como de fábrica.</p>
+    <div class="boot" aria-label="Secuencia de arranque">
+      <span>encendido</span><i>→</i><span>boot.sh</span><i>→</i><span>scripts once/*.sh</span><i>→</i><span>boot_dual.sh</span><i>→</i><span>último modo usado: hbplayer o Sony</span>
+    </div>
+    <p>Desde el reproductor, “Volver al Walkman” pasa a la interfaz de Sony sin reiniciar. Desde la interfaz de Sony, mantener HOME 3 segundos vuelve al reproductor. La música de Sony (86 temas en OMGAUDIO) sigue intacta.</p>
+  </div>
+</section>
+
+<!-- ============ HISTORIA ============ -->
+<section id="historia">
+  <div class="sec-head">
+    <div class="eyebrow">Línea de tiempo</div>
+    <h2>Cómo llegamos hasta acá</h2>
+  </div>
+  <div class="legend">
+    <span><span class="chip ok">probado</span> funcionó en el equipo</span>
+    <span><span class="chip warn">sin probar</span> instalado, falta verificar</span>
+    <span><span class="chip no">descartado</span> no es viable</span>
+  </div>
+
+  <!-- Fase 0 -->
+  <div class="phase">
+    <div class="phase-title"><h3>1 · El problema: un Walkman que no acepta archivos</h3><span class="dates">16–25 sep</span></div>
+    <ol class="tl">
+      <li><time>16 sep</time><div class="body">
+        <h4>Backup y preparación</h4>
+        <p>El NW-A829 japonés aparece como unidad <code>H:</code> pero ignora los MP3 copiados a mano: sólo reproduce lo que SonicStage escribe cifrado en <code>OMGAUDIO</code>. Hicimos backup del equipo y preparamos 86 MP3 de 7 discos con tags ID3v2.3 y tapas embebidas.</p>
+      </div></li>
+      <li><time>24 sep</time><div class="body">
+        <h4>SonicStage CP 4.3 en inglés <span class="chip ok">probado</span></h4>
+        <p>La versión japonesa 4.4 mostraba “????” en Windows en castellano. Con la 4.3 en inglés, región OpenMG Japón, importando por <em>File › Import › M3U</em>, se transfirieron los 86 temas con tapas. El 25 confirmaste que suenan.</p>
+      </div></li>
+    </ol>
+  </div>
+
+  <!-- Fase 1 -->
+  <div class="phase">
+    <div class="phase-title"><h3>2 · Convertir el firmware japonés en internacional</h3><span class="dates">25 sep</span></div>
+    <ol class="tl">
+      <li><time>mañana</time><div class="body">
+        <h4>Ingeniería inversa del formato de actualización</h4>
+        <p>Los paquetes <code>.UPG</code> usan el formato Rockbox v1 (MD5 + DES). Sacamos las claves por modelo del propio script de Sony, sondeamos el equipo por SCSI sin permisos de administrador y aplicamos el JP 1.02 oficial como prueba de bajo riesgo.</p>
+      </div></li>
+      <li><time>14:00</time><div class="body">
+        <h4>Firmware internacional adaptado <span class="chip ok">arrancó</span></h4>
+        <p>El firmware internacional, re-empaquetado con la clave japonesa, arranca con menús en castellano e inglés. Pero al conectar el USB el modo MTP falla: necesita un certificado WMDRM de fábrica que el equipo japonés no tiene.</p>
+      </div></li>
+      <li><time>15:00</time><div class="body">
+        <h4><code>fwtrig.py</code>: flashear sin clics</h4>
+        <p>Descubrimos que un comando SCSI hace que el equipo se flashee solo con el <code>.UPG</code> que tenga en la raíz. Desde ahí cada prueba fue un ciclo de ~60 segundos sin tocar el actualizador de Sony. Fue la herramienta clave de todo el proyecto.</p>
+      </div></li>
+      <li><time>15–19 h</time><div class="body">
+        <h4>8 builds de diagnóstico y un banco de experimentos</h4>
+        <p>Builds con logs de arranque, un archivo <code>EXPERIMENT.cfg</code> que el equipo lee al iniciar y vuelca resultados a <code>RESCUE_DEBUG</code>. Conclusión: el modo de contenido WMT/MTP del firmware internacional no es viable en esta unidad. Dejamos de tocar los nodos NVP porque guardan material de DRM.</p>
+      </div></li>
+      <li><time>19:45</time><div class="body">
+        <h4>Build final internacional 1.02-30 y la lección</h4>
+        <p>Quedó un firmware internacional estable con menú en castellano. Después notamos que el JP 1.02 oficial <b>ya tenía castellano</b> en el menú. El sprint dejó herramientas y conocimiento, pero ningún beneficio visible que no tuvieras ya.</p>
+        <p class="note">De acá salió la regla: probar primero la opción barata en el equipo.</p>
+      </div></li>
+      <li><time>noche</time><div class="body">
+        <h4>Indexador propio de OMGAUDIO <span class="chip no">descartado</span></h4>
+        <p>La idea era escribir la base de datos de Sony a partir de MP3 comunes. En esta unidad los archivos que escribe SonicStage están cifrados con OpenMG de punta a punta; un OMA sin cifrar da “formato no compatible”. Reproducir ese cifrado sería saltar el DRM, así que lo abandonamos y decidimos hacer <b>nuestro propio reproductor</b>.</p>
+      </div></li>
+    </ol>
+  </div>
+
+  <!-- Fase 2 -->
+  <div class="phase">
+    <div class="phase-title"><h3>3 · Correr código propio en el Walkman</h3><span class="dates">26 sep</span></div>
+    <ol class="tl">
+      <li><time>mañana</time><div class="body">
+        <h4>Radiografía del hardware</h4>
+        <p>SoC NEC MP201 (ARM926EJ-S + DSP SPXK5), DAC Cirrus Logic CS42L51, Bluetooth CSR BlueCore, 20,8 MB de RAM, pantalla 240×320, Linux 2.6.10. Volvimos al JP 1.02 oficial como base y le agregamos el gancho de arranque (1.02-40).</p>
+      </div></li>
+      <li><time>tarde</time><div class="body">
+        <h4>Toolchain y “HOLA MANU” en pantalla <span class="chip ok">probado</span></h4>
+        <p>Zig 0.15.2 portátil, enlazando contra la glibc 2.3.3 del equipo. La trampa: el kernel usa llamadas al sistema OABI, así que los binarios estáticos con musl se caían. Con eso resuelto, el primer programa dibujó en el framebuffer.</p>
+      </div></li>
+      <li><time>tarde</time><div class="body">
+        <h4>Bluetooth propio hacia el JBL Flip 5 <span class="chip ok">probado</span></h4>
+        <p>Emparejamos y mandamos audio A2DP fuera de la interfaz de Sony. El error 151 se resolvía conectando inmediatamente después del “Bonding completed”. Escuchaste la melodía en el parlante.</p>
+      </div></li>
+      <li><time>tarde</time><div class="body">
+        <h4>Reproductor v1: audiolibros con doble arranque <span class="chip ok">probado</span></h4>
+        <p>Lista de carpetas, reproducción con libmad, posición guardada por archivo, temporizador y retorno a Sony. <span class="quote">“Anduvo perfecto.”</span></p>
+      </div></li>
+      <li><time>noche</time><div class="body">
+        <h4>v2 a v9 en una noche</h4>
+        <p>Modo foco con campanas y ruido blanco/rosa/marrón; Game Boy (gnuboy) con Pokémon Crystal; la fuente de 22 px y las texturas originales de Sony leídas del firmware; inicio 3×3 con la animación de íconos de Sony; música por artista y álbum con tapas; FLAC y AAC; ecualizador; Doom (Freedoom); NES; velocidad de lectura; gapless; ReplayGain; letras .lrc; despertador; watchdog que reinicia si algo se cuelga.</p>
+      </div></li>
+      <li><time>22:00</time><div class="body">
+        <h4>Firmware 1.02-41: chau “Simple Mode” <span class="chip ok">probado</span></h4>
+        <p>Un parche de 3 bytes en el binario de Sony evita el aviso que aparecía en cada arranque. Confirmaste que desapareció.</p>
+      </div></li>
+    </ol>
+  </div>
+
+  <!-- Fase 3 -->
+  <div class="phase">
+    <div class="phase-title"><h3>4 · Internet por el teléfono y el DSP oculto</h3><span class="dates">27 sep</span></div>
+    <ol class="tl">
+      <li><time>madrugada</time><div class="body">
+        <h4>Red sobre Bluetooth sin red en el kernel</h4>
+        <p>El kernel no tiene red ni BNEP. Armamos todo en espacio de usuario: BNEP sobre L2CAP crudo del stack de Sony, lwIP para TCP/IP, mbedTLS para HTTPS. Con el anclaje del Galaxy S23+ funcionó DHCP, DNS y HTTPS, pero a 1 KB/s.</p>
+      </div></li>
+      <li><time>21:00</time><div class="body">
+        <h4>La causa: un buffer de 512 bytes <span class="chip ok">resuelto</span></h4>
+        <p>Un sniffer que lee la memoria del kernel mostró que la mitad de los paquetes llegaba cortada: el buffer del puerto serie se desbordaba. La solución fue una sola opción (<code>ASYNC_LOW_LATENCY</code>). Pasamos de 1 a 50–65 KB/s y devolvimos el chip Bluetooth a su configuración de fábrica.</p>
+      </div></li>
+      <li><time>21:40</time><div class="body">
+        <h4>Podcasts que se bajan solos</h4>
+        <p>“Buscar episodios nuevos” lee <code>feeds.txt</code>, se conecta por el teléfono y descarga en segundo plano mientras escuchás. Suma Podcasting 2.0: transcripciones (SRT/VTT) como letras y capítulos navegables.</p>
+      </div></li>
+      <li><time>22:10</time><div class="body">
+        <h4>El DSP de Sony, desde nuestro código <span class="chip ok">probado</span></h4>
+        <p>Toda la decodificación de Sony corre en un DSP NEC aparte, vía OpenMAX. Lo abrimos desde nuestro programa: MP3 a 4,6× tiempo real con 0,2% de CPU del ARM. Escuchaste los WAV y confirmaste que el tono y la velocidad eran correctos.</p>
+      </div></li>
+      <li><time>noche</time><div class="body">
+        <h4>Game Boy Advance y control remoto</h4>
+        <p>Portamos gpSP (GBA) con BIOS abierta. Armamos un modo control remoto: el Walkman se presenta ante el teléfono como teclado y control multimedia Bluetooth, y sus botones manejan el teléfono.</p>
+      </div></li>
+    </ol>
+  </div>
+
+  <!-- Fase 4 -->
+  <div class="phase">
+    <div class="phase-title"><h3>5 · Efectos de Sony, estabilidad y sincronización real</h3><span class="dates">28 sep</span></div>
+    <ol class="tl">
+      <li><time>00:00</time><div class="body">
+        <h4>Hi-res</h4>
+        <p>FLAC de 24 bits sale en 32 bits al DAC; un remuestreador polifásico convierte 88,2/96/192 kHz a 44,1 kHz. El DAC no acepta tasas mayores.</p>
+      </div></li>
+      <li><time>00:30</time><div class="body">
+        <h4>Control remoto emparejado <span class="chip warn">teclas sin probar</span></h4>
+        <p>El S23+ se emparejó y conectó con el Walkman en el segundo intento. No quedó registrada ninguna tecla: probablemente nadie apretó botones del Walkman durante la prueba.</p>
+      </div></li>
+      <li><time>01:05</time><div class="body">
+        <h4>DSEE, VPT, ecualizador y normalizador de Sony <span class="chip ok">medido</span></h4>
+        <p>Encontramos la página de efectos del DSP. DSEE sólo actúa si se le pasa el bitrate real del MP3 (+7 dB por encima de 11 kHz en un audiolibro de 64 kbps). ATRAC sin DRM también decodifica.</p>
+      </div></li>
+      <li><time>01:50</time><div class="body">
+        <h4>“Máxima batería”: el DSP maneja la salida <span class="chip ok">medido</span></h4>
+        <p>En modo directo el DSP envía el audio al DAC sin pasar por el ARM. Funciona con MP3, AAC, WMA y ATRAC, con pausa y búsqueda. AAC baja de ~13% a ~5% de CPU.</p>
+      </div></li>
+      <li><time>12:30</time><div class="body">
+        <h4>“Cada vez que reproduce vuelve a Sony” <span class="chip ok">arreglado</span></h4>
+        <p>Dos cuelgues: acceso desalineado al decodificar tapas JPEG y una re-entrada en lwIP durante el handshake TLS. Agregamos un reporte de fallas con dirección y registro. La sesión siguiente no tuvo caídas.</p>
+      </div></li>
+      <li><time>14:00</time><div class="body">
+        <h4>Primera sincronización completa en el reproductor <span class="chip ok">probado</span></h4>
+        <p>Tres feeds, un episodio de 64 MB en 21 minutos, con la música sonando. Corregimos nombres con acentos: la partición FAT se monta sin UTF-8 y aparecían duplicados con caracteres rotos.</p>
+      </div></li>
+      <li><time>14:25</time><div class="body">
+        <h4>Corrupción de la FAT, reparada</h4>
+        <p>El equipo y Windows escribían en la misma partición al mismo tiempo. <code>chkdsk H: /F</code> la reparó y quedaron reglas sobre quién escribe cuándo.</p>
+      </div></li>
+    </ol>
+  </div>
+
+  <!-- Fase 5 -->
+  <div class="phase">
+    <div class="phase-title"><h3>6 · Pulido: velocidad, batería e interfaz de Sony</h3><span class="dates">29–30 sep</span></div>
+    <ol class="tl">
+      <li><time>29 sep</time><div class="body">
+        <h4>131 KB/s por el teléfono</h4>
+        <p>La red estaba limitada por CPU. Con paquetes de 1400 bytes y la CPU a 248 MHz durante descargas: 4,4 MB en ~35 segundos.</p>
+      </div></li>
+      <li><time>29 sep</time><div class="body">
+        <h4>Rediseño al estilo Sony <span class="chip ok">probado</span></h4>
+        <p>Barra plateada, barra de estado con los íconos originales, fondo azul grisáceo, barra naranja de selección, pantalla de reproducción como la de Sony. Borrado manual de episodios (nunca se borra nada solo).</p>
+      </div></li>
+      <li><time>29 sep</time><div class="body">
+        <h4>Cinco tandas de optimización (56 ítems)</h4>
+        <p>Audio que no se corta con ninguna pantalla; reanudación de descargas segura; guardado atómico; gobernador de CPU por carga; velocidad de voz con Sonic; recorte de silencios y realce de voz; crossfeed y loudness para auriculares. Encontramos que el equipo arranca a 248 MHz y un error de los filtros que generaba un offset de continua enorme.</p>
+      </div></li>
+      <li><time>29 sep</time><div class="body">
+        <h4>El ecualizador de Sony, medido banda por banda</h4>
+        <p>Clear Bass (~55 Hz) y 5 bandas (400 Hz, 1k, 2,5k, 6,3k, 16k) en pasos de 2 dB. La pantalla Sonido › Ecualizador ahora es el de Sony y funciona con Máxima batería.</p>
+      </div></li>
+      <li><time>29 sep</time><div class="body">
+        <h4>Arranque 3,7 s y “Volver al Walkman” sin reiniciar <span class="chip ok">probado</span></h4>
+        <p>El equipo recuerda el último modo usado. Si el reproductor se cae, se reinicia una vez y retoma lo que sonaba. La pantalla LCD se apaga de verdad con la luz apagada.</p>
+      </div></li>
+      <li><time>30 sep</time><div class="body">
+        <h4>Diseño final y perfil de auriculares <span class="chip ok">probado</span></h4>
+        <p>Episodios con tapa y progreso, mosaico de álbumes, pantalla de Descargas, volumen en 30 pasos estilo Sony, dígitos de Sony. Perfil AutoEq para tus KZ EDX Pro. <span class="quote">“Quedó espectacular.”</span></p>
+      </div></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ============ LOGROS ============ -->
+<section id="logros">
+  <div class="sec-head">
+    <div class="eyebrow">Qué hace hoy</div>
+    <h2>Logros por área</h2>
+  </div>
+  <div class="areas">
+    <div class="area">
+      <h3>Reproductor <small>hbplayer</small></h3>
+      <ul>
+        <li>Música por artista, álbum y canción, con tapas y mosaico</li>
+        <li>Audiolibros y podcasts con posición guardada por archivo</li>
+        <li>MP3, FLAC (hasta 24 bits), AAC/M4A, WMA, ATRAC sin DRM</li>
+        <li>Velocidad 0,75× a 2×, gapless, ReplayGain, letras y transcripciones</li>
+        <li>Capítulos, temporizador, despertador, aleatorio y repetir</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3>Audio y DSP <small>NEC SPX</small></h3>
+      <ul>
+        <li>MP3/AAC/WMA/ATRAC decodificados en el DSP de Sony</li>
+        <li>Modo “Máxima batería”: el DSP maneja la salida</li>
+        <li>Ecualizador Sony con Clear Bass, VPT, DSEE y normalizador</li>
+        <li>EQ avanzado, crossfeed, loudness y perfil AutoEq</li>
+        <li>Recorte de silencios y realce de voz para libros</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3>Internet y podcasts <small>vía S23+</small></h3>
+      <ul>
+        <li>TCP/IP y HTTPS completos sobre Bluetooth del teléfono</li>
+        <li>Descarga en segundo plano, reanudable, hasta ~130 KB/s medidos</li>
+        <li>Feeds con caché y gzip, Podcasting 2.0</li>
+        <li>Corrección del reloj con la hora de los servidores</li>
+        <li>Script <code>podsync.py</code> equivalente en la PC</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3>Bluetooth <small>CSR BCHS</small></h3>
+      <ul>
+        <li>Audio a parlantes A2DP con reconexión automática</li>
+        <li>Recuperación si el stack se traba (recarga del módulo)</li>
+        <li>El Walkman como control remoto del teléfono (teclas sin probar)</li>
+        <li>Modo receptor (teléfono → Walkman), sin probar</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3>Juegos <small>248 MHz</small></h3>
+      <ul>
+        <li>Game Boy / Color (gnuboy): 60 fps, guardado, turbo con HOLD, rotación</li>
+        <li>NES, Doom (Freedoom), GBA (gpSP)</li>
+        <li>Música de fondo mientras jugás</li>
+      </ul>
+    </div>
+    <div class="area">
+      <h3>Sistema <small>firmware 1.02-41</small></h3>
+      <ul>
+        <li>Doble arranque con memoria del último modo</li>
+        <li>Watchdog de hardware y retoma después de una caída</li>
+        <li>Gobernador de CPU 83/124/248 MHz según carga</li>
+        <li>Interfaz con fuente, texturas y animaciones de Sony</li>
+        <li>Modo foco con campanas por intervalos y ruidos</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ PANTALLAS ============ -->
+<section id="pantallas">
+  <div class="sec-head">
+    <div class="eyebrow">240 × 320, renderizadas con el código real</div>
+    <h2>Pantallas</h2>
+  </div>
+  <div class="gallery">
+    <figure><img src="img/01_home_musica.png" alt="Inicio con Música seleccionada" loading="lazy"><figcaption>Inicio 3×3 con la animación de íconos de Sony</figcaption></figure>
+    <figure><img src="img/08_reproduciendo_musica.png" alt="Reproduciendo música" loading="lazy"><figcaption>Reproduciendo, con tapa</figcaption></figure>
+    <figure><img src="img/08b_letras.png" alt="Vista de letras" loading="lazy"><figcaption>Letras y transcripciones sincronizadas</figcaption></figure>
+    <figure><img src="img/06d_albumes_mosaico.png" alt="Álbumes en mosaico" loading="lazy"><figcaption>Álbum en mosaico (OPTION alterna)</figcaption></figure>
+    <figure><img src="img/13b_episodios_portadas.png" alt="Episodios de podcast" loading="lazy"><figcaption>Episodios con tapa, nuevos y progreso</figcaption></figure>
+    <figure><img src="img/12c_podcast_capitulos.png" alt="Podcast con capítulos" loading="lazy"><figcaption>Podcast con capítulos</figcaption></figure>
+    <figure><img src="img/31_descargas.png" alt="Pantalla de descargas" loading="lazy"><figcaption>Descargas en segundo plano</figcaption></figure>
+    <figure><img src="img/04f_ecualizador_sony.png" alt="Ecualizador de Sony" loading="lazy"><figcaption>Ecualizador de Sony con Clear Bass</figcaption></figure>
+    <figure><img src="img/02_home_audiolibros_sonando.png" alt="Inicio con Audiolibros" loading="lazy"><figcaption>Inicio, con un libro sonando</figcaption></figure>
+    <figure><img src="img/17_modo_foco.png" alt="Modo foco" loading="lazy"><figcaption>Modo foco</figcaption></figure>
+    <figure><img src="img/15_juegos.png" alt="Lista de juegos" loading="lazy"><figcaption>Juegos: GB, NES, Doom, GBA</figcaption></figure>
+    <figure><img src="img/20d_despertador_sonando.png" alt="Despertador sonando" loading="lazy"><figcaption>Despertador</figcaption></figure>
+  </div>
+</section>
+
+<!-- ============ POR TESTEAR ============ -->
+<section id="testear">
+  <div class="sec-head">
+    <div class="eyebrow">Instalado o armado, falta verificar en el equipo</div>
+    <h2>Pendiente de testear</h2>
+  </div>
+  <div class="todo">
+    <div class="row"><div class="tag"><span class="chip warn">red</span></div><div><b>Tanda 2 de optimización de red</b><p>ACKs, DHCP más rápido, TLS con X25519, GET condicional y gzip en feeds. Prueba: “Buscar episodios” dos veces seguidas con el anclaje del teléfono activo, y mirar en el log “pan: up in X s” y “tls … in X s”.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">batería</span></div><div><b>Prueba de batería completa</b><p><code>once/z_battery.sh</code> (libmad vs DSP vs directo, 30 min cada uno) no llegó a terminar. Falta también la comparación justa Sony vs nuestro con “Máxima batería” activo y sin efectos de auriculares.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">pantalla</span></div><div><b>Brillo y LCD apagado</b><p>El ajuste de brillo usa el ioctl correcto de Sony desde el 30/09, sin verificar. Confirmar con el medidor que las interrupciones del LCD bajan a ~0 con la pantalla apagada en uso real.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">memoria</span></div><div><b>Análisis de RAM en ambos modos</b><p>El medidor ya registra memoria libre, caché y RSS. Hace falta una sesión en cada modo y exportar <code>/var/hb/meter.txt</code>. Después, sacar las líneas del medidor de <code>boot_dual.sh</code>.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">bluetooth</span></div><div><b>Teclas del control remoto</b><p>El teléfono se empareja y conecta con el Walkman, pero nunca se probó que los botones del Walkman lleguen al teléfono. Probar desde Bluetooth › “Mando para el teléfono”.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">bluetooth</span></div><div><b>Modo receptor</b><p>Que el teléfono encuentre al Walkman y le mande audio. Nunca se probó.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">sistema</span></div><div><b>Despertador desde suspensión</b><p>La alarma programa el RTC antes de suspender; falta confirmar que el equipo se despierta solo.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">juegos</span></div><div><b>GBA en uso real</b><p>Mode 7 y uCity se ven bien, pero la prueba de instrucciones Thumb pareció colgarse. Revisar y jugar un rato.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">podcasts</span></div><div><b>Transcripciones, capítulos y reanudación</b><p>Usarlos con episodios reales. El EP247 de Corridor Cast quedó trabado en 15 MB (CDN de Megaphone): ver si retoma.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip warn">audio</span></div><div><b>Ecualizador Sony para los KZ EDX Pro</b><p>La aproximación (error 1,45 dB) se calculó suponiendo el ancho de las bandas. Afinarla con las mediciones reales de <code>out/fx2</code>.</p></div></div>
+  </div>
+</section>
+
+<!-- ============ POR LOGRAR ============ -->
+<section id="ideas">
+  <div class="sec-head">
+    <div class="eyebrow">Lo que queda abierto</div>
+    <h2>Por lograr</h2>
+  </div>
+  <div class="todo">
+    <div class="row"><div class="tag"><span class="chip idea">próximo</span></div><div><b>Publicar el proyecto</b><p>Subir el código a GitHub y armar un instalador simple para que otros dueños del A820 lo puedan probar.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">próximo</span></div><div><b>Sincronización automática desde la PC</b><p>Tarea programada de Windows con <code>podsync.py</code> que corre al enchufar el equipo. Propuesta, no hecha.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">mejora</span></div><div><b>Montar la FAT con UTF-8</b><p>Hoy los nombres se traducen a Latin-1 y se pierden caracteres fuera de ese rango. Requiere cambiar el gancho del firmware.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">idea</span></div><div><b>Radio por internet</b><p>Con Opus en punto fijo, sobre la misma conexión del teléfono.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">idea</span></div><div><b>Apps chicas con red</b><p>Hora por SNTP, ListenBrainz, clima con Open-Meteo, cliente Gemini.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">idea</span></div><div><b>Más emuladores y voz</b><p>PokeMini, SMS Plus, eSpeak-NG para leer texto en voz alta.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">idea</span></div><div><b>Resúmenes de podcasts</b><p>Usar las transcripciones de Podcasting 2.0 con un modelo en la nube.</p></div></div>
+    <div class="row"><div class="tag"><span class="chip idea">locura</span></div><div><b>Moonshots</b><p>Un LLM diminuto (llama2.c int8), Jazelle para Java en hardware, y código propio corriendo en el DSP.</p></div></div>
+  </div>
+</section>
+
+<!-- ============ DESCARTADO ============ -->
+<section id="descartado">
+  <div class="sec-head">
+    <div class="eyebrow">Callejones sin salida, y por qué</div>
+    <h2>Lo que no funcionó</h2>
+  </div>
+  <div class="dead">
+    <div><h3>MTP y arrastrar-y-soltar con Sony</h3><p>El firmware internacional necesita un certificado WMDRM de fábrica. Sin él, la creación de la biblioteca se cuelga y la app muere. Conseguirlo de otro equipo sería eludir DRM.</p></div>
+    <div><h3>Escribir la base OMGAUDIO</h3><p>En esta unidad todo está cifrado con OpenMG. Sin cifrado, Sony dice “formato no compatible”.</p></div>
+    <div><h3>BNEP en el kernel</h3><p>Está compilado afuera del módulo de Sony. Lo resolvimos en espacio de usuario.</p></div>
+    <div><h3>Cambiar timeouts del chip Bluetooth</h3><p>Ayudó un poco, pero la causa real era el buffer serie. El chip volvió a fábrica. Un reinicio en caliente mata el stack.</p></div>
+    <div><h3>Clear Stereo y salida a 88,2 kHz</h3><p>Clear Stereo no cambia ni un bit. El DAC sólo acepta 11/22/44,1 kHz (con 24 bits).</p></div>
+    <div><h3>Ahorro de batería con MP3 en el DSP</h3><p>Ambos rondan el 5% de CPU: libmad con ensamblador ya es barato. El ahorro real está en AAC y en el modo directo.</p></div>
+  </div>
+</section>
+
+<!-- ============ HERRAMIENTAS ============ -->
+<section id="herramientas">
+  <div class="sec-head">
+    <div class="eyebrow">Dónde está cada cosa</div>
+    <h2>Herramientas y archivos clave</h2>
+  </div>
+  <div class="tbl">
+    <table>
+      <thead><tr><th>Archivo</th><th>Para qué sirve</th></tr></thead>
+      <tbody>
+        <tr><td>firmware_work\fw\fwtrig.py</td><td>Flashea o reinicia el equipo por SCSI sin el actualizador de Sony (<code>go &lt;md5&gt;</code>).</td></tr>
+        <tr><td>firmware_work\fw\build_hb.py</td><td>Arma el firmware con gancho y parches binarios (hoy 1.02-41, md5 <code>ee63d042…</code>).</td></tr>
+        <tr><td>firmware_work\fw\jp\NW_WM_FW.UPG</td><td>JP 1.02 oficial (md5 <code>fa3c6ae0…</code>): vuelta atrás completa.</td></tr>
+        <tr><td>firmware_work\rescue_kit\</td><td>Actualizador oficial preparado para el modo rescate.</td></tr>
+        <tr><td>H:\HB\boot.sh</td><td>Arranque: corre <code>once/*.sh</code> una vez, después <code>boot_dual.sh</code>.</td></tr>
+        <tr><td>homebrew\hbplayer\</td><td>El reproductor. <code>build.sh</code> compila; <code>shots.py</code> y <code>mock.c</code> generan pantallas en la PC.</td></tr>
+        <tr><td>homebrew\dspdec\</td><td>Proceso auxiliar que habla con el DSP de Sony por OpenMAX.</td></tr>
+        <tr><td>homebrew\net\</td><td>BNEP, lwIP, mbedTLS, cliente HTTPS, RSS y el sniffer BCSP.</td></tr>
+        <tr><td>homebrew\hello\fixpthread.py</td><td>Paso obligatorio después de compilar cualquier binario para el equipo.</td></tr>
+        <tr><td>podcasts\podsync.py</td><td>Sincronización de podcasts desde la PC con los mismos nombres de archivo.</td></tr>
+        <tr><td>research\dsp\FINDINGS.md</td><td>Todo lo descubierto sobre el DSP.</td></tr>
+        <tr><td>firmware_work\INVESTIGACION_FIRMWARE.md</td><td>Análisis completo del firmware y el hardware.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ LECCIONES ============ -->
+<section id="lecciones">
+  <div class="sec-head">
+    <div class="eyebrow">Para la próxima</div>
+    <h2>Lecciones aprendidas</h2>
+  </div>
+  <ol class="rules">
+    <li><b>Probar primero la opción barata en el equipo.</b> El castellano ya estaba en el firmware oficial.</li>
+    <li><b>Nunca tocar NVP ni claves de DRM.</b> El firmware de Sony queda siempre como respaldo.</li>
+    <li><b>El kernel usa syscalls OABI.</b> Enlazar contra la glibc del equipo y pasar todo binario por <code>fixpthread.py</code>. No hay <code>librt</code>.</li>
+    <li><b>Una sola parte escribe en la FAT a la vez.</b> Windows y el equipo escribiendo juntos corrompieron la partición.</li>
+    <li><b><code>boot.sh</code> con fin de línea LF.</b> Con CRLF el shell del equipo falla de formas raras.</li>
+    <li><b>Diseñar a 240×320 con el renderizador real.</b> Una sola fuente, líneas de 2 px o más, sin brillos ni desenfoques.</li>
+    <li><b>Medir antes de prometer.</b> El equipo arranca a 248 MHz, la memoria escala con el reloj y 124 MHz es la mitad de rápido.</li>
+  </ol>
+</section>
+
+<footer>Bitácora armada el 6 de octubre de 2026 a partir de las notas del proyecto. Último cambio registrado en el equipo: 30 de septiembre, 11:10.</footer>
+
+</div>

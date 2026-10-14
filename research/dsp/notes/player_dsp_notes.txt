@@ -1,0 +1,91 @@
+hbplayer <-> dspdec: DSP decoding and Sony effects in the player (2026-09-28)
+UPDATE (later the same day): protocol extended with direct sessions (R / Z / X, POS / REL packets; notes/direct_notes.txt)
+and AAC / WMA (O ... aac|wma, M / A / E access-unit streams, ACK packets; notes/aac_wma_notes.txt). The header of
+homebrew/dspdec/dspdec.c is the authoritative protocol description.
+Code: homebrew/dspdec/dspdec.c (helper), homebrew/dspdec/oma.h, homebrew/hbplayer/dspclient.c, dec.c, engine.c.
+ATRAC details: notes/atrac_notes.txt. Effect page: effects/effects_notes.txt. DSEE: effects/dsee_notes.txt.
+
+== Helper protocol (stdin text lines, stdout 'DSPC' packets {magic, seq, len, flags} + PCM)
+  O <seq> <offset> [<codec>] <path>   decode a file; codec mp3 (default, old form "O seq off path" still
+                                      accepted) | at3 | atx | aal. ATRAC offsets are rounded down to a frame
+                                      after the EA3 header (0 = first frame).
+  P <seq> <rate>                      start the PCM effect stream (LPCMD.FTB, S16 stereo in at 8..48 kHz,
+                                      44.1 kHz stereo out, continuous, no EOS)
+  D <len>\n + len bytes               PCM for the running P stream (len multiple of 4, <= 65536)
+  S / Q                               stop / quit
+  F <vpt> <eqhex> <dn>                effect page: VPT, EQ, dynamic normalizer (as before)
+  G <dsee> <gain> <cs>                effect page: DSEE (0 / f), volume level (s16 hex), Clear Stereo (u32 hex)
+  packet flags: 1 EOS, 2 error, 4 ready, 8 protected / unsupported file (with 2)
+One component handle at a time: switching codec = Idle -> Loaded, FreeHandle, GetHandle(new) (~ms); same codec
+with other parameters = Idle -> Loaded -> SetParameter -> Idle. SIGTERM only sets a flag; the main loop (or a
+write interrupted by it) tears OMX down outside the handler. Test mode: dspdec LOG -d CODEC IN OUT.raw [-F flags]
+[-s secs] decodes a file to raw S16 and prints RESULT / STATS (used by effects/boot_dsee.sh).
+
+== Player API (hb.h)
+  dsp_open(path, offset, codec) / dsp_read / dsp_stop / dsp_protected / dsp_stop_helper / dsp_fx_update
+  dspfx_active(rate)         1 when a Sony effect is selected (sony_vpt >= 0 || sony_eq > 0 || sony_dn), the
+                             DSP setting is on, the DSP is not already decoding the track, the helper is not
+                             broken and rate is one LPCMD takes (8/11.025/12/16/22.05/24/32/44.1/48 kHz)
+  dspfx_process(in, n, rate, out, max_out)   push n frames, get back what the DSP has finished (44.1 kHz);
+                             0 while the pipeline fills; -1 = not available (play the unprocessed PCM)
+  dspfx_reset()              drop what is in flight (new seq + "S"); the next dspfx_process restarts
+  dec_error()                "Archivo protegido (DRM)" / "Formato ATRAC no soportado" / "ATRAC necesita el
+                             DSP" / "Error del DSP (ATRAC)" for a notice
+Settings hooks for the settings owner (not changed by me): dsp_enabled ("MP3 en el DSP de Sony") now also
+gates ATRAC playback and the DSP effects on FLAC/AAC (label could become "Usar el DSP de Sony"); the Sony VPT /
+EQ / normalizer items now work for every format, not only DSP-decoded MP3 (dsp_fx_update() as before).
+.oma / .aa3 / .omg are in dec_is_audio(), so the browsers list them.
+
+== Engine integration (engine.c, 16-bit path only)
+decode -> (speech time-stretch) -> dspfx_process [rate -> 44.1k] -> aout_start(44100) -> our EQ -> gain /
+ReplayGain -> fade-in -> aout_write. It sits before our own EQ, the software (BT) volume and the fade, not after
+them: the normalizer must not undo the volume, and the fade must shape what is actually heard (the DSP output
+is ~0.1-0.2 s behind the input). Not in the hi-res 24-bit path.
+Resets (dspfx_reset): eng_seek / eng_seek_to, eng_stop, user next/previous, effects switched off (called each
+frame while inactive: a no-op unless a stream runs). NOT on natural track changes (the stream is continuous,
+so the tail of a track is not cut) and not on pause (the DSP keeps its few buffers; they play on resume).
+A rate change between tracks (44.1k -> 48k FLAC) restarts the stream with new LPCMD parameters (short gap).
+Open failures (protected ATRAC, bad files) show dec_error() as a notice and eng_frame skips to the next track
+(stops after a whole queue of failures). ATRAC decode errors mid-track: dec_read -1 -> "decode error, next".
+
+== Effect stream data flow / latency / cost (estimates; nothing measured on the device yet)
+- Player: each eng_frame pushes one decoded frame (<= 1152 frames, up to 4096 after time-stretch) as
+  "D len" in <= 8 KB pieces. The pipe to the helper is non-blocking (kernel 2.6.10 pipes hold 4 KB): while a
+  write waits, the player reads the helper's output into a 32768-frame FIFO, so neither side can block the
+  other. Then everything already processed is returned (normally ~1 frame's worth once the pipeline is full).
+- Helper: 3 x 12 KB queue; sends a DSP input buffer as soon as it has 4 KB, or any amount while fewer than 2
+  buffers are with the DSP. LPCMD returns 8 KB (2048-frame) output buffers.
+- Latency input -> output: 1 input chunk + up to 1 output buffer + pipe transfer: ~50-120 ms, ~200 ms worst
+  case at stream start (the first calls return 0 frames: a short silence after a seek / track start with
+  effects on). Seeks drop everything (new seq), so the latency does not show as lag after seeking.
+- DSP speed: LPCMD ran at ~1.4x realtime for 44.1k stereo in experiment 3 (the same as MP3 decoding, so
+  probably paced by the DSP task, not its capacity). Enough, but with little margin: the engine's "fill 0.5 s
+  ahead" loop will fill the output buffer more slowly with effects on; audio should not underrun as long as the
+  UI keeps calling eng_step.
+- ARM cost: two pipe copies + one memcpy into the DSP pool per sample: ~350 KB/s through pipes, well under 5 %
+  of the ARM926 at 44.1k stereo; the processing itself is on the DSP.
+- Failure handling: no progress writing to the helper for 1.5 s, a helper error packet or a dead helper ->
+  fail() (helper killed, counted; after 3 failures the DSP is not used again in this session) and the PCM
+  plays unprocessed from then on. Underflow events from the DSP while the stream starves (pause) are ignored.
+
+== Review fixes in the same files (2026-09-28)
+- dspclient: dsp_stop_helper keeps reading (and discarding) the helper's output while it waits for it to exit,
+  then SIGTERM (which dspdec now handles outside the signal handler), then SIGKILL. spawn(): closes all fds >= 3
+  in the child (no sockets / devices leak into dspdec), cleans up on pipe / fork failure.
+- dec.c: VBR MP3: the Xing frame count gives the duration and the average bitrate (the first frame's bitrate
+  was used before), the Xing TOC is used for seeks and DSP resume positions; the gapless sample count uses 576
+  samples per frame for MPEG-2/2.5. dec_hires() no longer sends 16-bit files below 44.1 kHz through the hi-res
+  path (upsampling gains nothing).
+- engine.c: hires_frame limits each read so rs_process can't overflow out32 for low-rate 24-bit files
+  (in <= 2304 * rate / 44100 frames); a failed hi-res start (rs_init / aout_start32) is remembered for the track
+  instead of being retried every frame.
+
+== What to test on the device
+1. effects/boot_dsee.sh part 6 (ATRAC in test mode) - see atrac_notes.txt.
+2. In hbplayer (after copying the new dspdec to /tmp via the usual launcher and hbplayer):
+   - test_at3.oma in the music browser: plays a tone L, R, both; seek works (+-30 s beyond the end -> next).
+   - a protected .oma (any OMGAUDIO file): notice "Archivo protegido (DRM)", the next track plays.
+   - FLAC / AAC with Sony VPT 3 or an EQ preset: effect audible, ~0.1 s silence at start, seek ok, pause /
+     resume ok; switching the effect off mid-song: back to direct playback within a frame; dspdec.log in the
+     state dir shows "pcm stream seq ...". Watch for "fx stream stalled" in the player log.
+   - an MP3 with effects on is still decoded by the DSP (no LPCMD stream: effects via the page as before).

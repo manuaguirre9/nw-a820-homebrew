@@ -1,0 +1,74 @@
+ATRAC on the NW-A829 DSP - protocol notes (2026-09-28)
+Reversed from rootfs_omf/omf/omf_mc_{at3d,atxd,aald}_ftb.so (disassembled with scripts/sodis.py) and
+bin_ref/gemini-ICX1115 (effects/gdis.py): GapOmfUtil.c param builders 0x2dc394 (AT3) / 0x2dc544 (ATX) /
+0x2dc7f0 (AAL), decoder cmps 0x2deb5c / 0x2dee98 / 0x2df1d4, separators GapAT3XSeparatorCmp.c (0x2d6000..)
+and GapOMAAALSeparatorCmp.c (0x2d7e00..), OMA parser omg_oma_parser.c (0x40e600..0x40f100).
+Implemented in homebrew/dspdec (codecs at3 / atx / aal) and homebrew/dspdec/oma.h (shared with hbplayer dec.c).
+
+== Components (all three: same NEC framework as MP3D.FTB, see mp3d_notes.txt)
+                      OMX.SONY.AT3D.FTB        OMX.SONY.ATXD.FTB        OMX.SONY.AALD.FTB
+  input pool          0x33E40000, 0xC000       0x33E40000, 0xC000       0x33E40000, 0x48000
+  input buffers       24 x 0x800 (2048)        24 x 0x800               24 x 0x3000 (12288)
+  output              0x33EA4000, 24 x 8192    same                     same
+  Get/SetConfig       NotImplemented           NotImplemented           NotImplemented
+  gemini decoder cmp  in 0x800, out 0x2000     in 0x800, out 0x2000     in 0x3000, out 0x2000, 24 each
+Parameter block 0xFF000001 (u16, no OMX header, SetParameter only in Loaded; values out of range ->
+0x80001019 UnsupportedSetting):
+  AT3D  +0 6..7 (6)  +2 ch 1..2 (2)  +4 ==4  +6 free (0)  +8 joint stereo 0/1  +a ==4  +c frame bytes:
+        js 0 -> 0x130 (105 kbps) or 0x180 (132 kbps); js 1 -> 0xc0 (66 kbps)
+        gemini: {6, 2, 4, 0, js, 4, frame}; only 44.1 kHz stereo (checks rate == 44100, channels == 2)
+  ATXD  +0 6..7 (6)  +2 ch 1..2 (2)  +4 ==4  +6 free (0; gemini 1)  +8 ==4  +a frame bytes, one of
+        0xc0 0x118 0x178 0x230 0x2e8 0x3a8 0x460 0x5d0 0x748 0x800 (32 48 64 96 128 160 192 256 320 352 kbps)
+        gemini: {6, 2, 4, 1, 4, frame}; 44.1 kHz, channels 2 and channel id 2 only
+  AALD  +0 6..7  +2 1..2  +4 ==4  +6 base layer 0 none / 1 ATRAC3plus / 2 ATRAC3  +8 ==4  +a base frame bytes
+        (ATRAC3: must be 0x180; ATRAC3plus: the ATXD list)  +c block code (base AT3 -> must be 1, base ATX ->
+        must be 2): gemini maps block samples 0x200 / 0x400 / 0x800 -> 0 / 1 / 2
+        gemini: {6, 2, 4, base, 4, base frame, block code}
+EmptyThisBuffer: NO byte swap (unlike MP3D), no length check; DSP cmd 0x0a {len, +2, +6, +8, +a (, +c for
+AT3), nFlags, pBuffer, phys, nTickCount, nTimeStamp}. AALD additionally sends a u16 from a per-buffer
+private struct (hdr->pInputPortPrivate + 4, a .bss table the component points each input header at in its own
+AllocateBuffer); gemini's AAL separator writes it (0x2d9a54, from its frame info +0x3c) - meaning unknown, we
+leave it 0.
+nFlags as gemini sets them (0x2dc06c with mask 5): 1 = EOS (last frame), 0x10000 = from the separator's one-shot
+state flag (+0x13a8, set around start / seek, cleared after the next frame) -> dspdec sets 0x10000 on the first
+buffer after every start (test mode: -F 0 turns it off).
+Framing (GapAT3XSeparatorCmp 0x2d6208): the separator reads exactly one frame (frame bytes from the header)
+per input buffer from the file position after the EA3 header; seeks are aligned to the frame size relative to
+the data start (0x2d6c60 __moddi3 by the frame size). AAL (GapOMAAALSeparatorCmp): the data is a sequence of
+"BLK" blocks: 24-byte header ("BLK", u8, BE16 payload length at +4, BE16 +6, BE32 +8, BE16 +12, 8 more
+bytes), block = header + payload, found by scanning at 8-byte steps; one block per 12 KB buffer.
+Samples per frame: ATRAC3 1024, ATRAC3plus 2048 (at 44.1 kHz: 23.2 / 46.4 ms).
+
+== OpenMG container (oma.h has the parser)
+ID3v2-like tag with magic "ea3" (syncsafe size), then the 96-byte "EA3" header:
+  [3] version (gemini accepts 1..3; ffmpeg's muxer writes 0 - we accept anything), [4..5] header size 0x0060,
+  [6..7] BE encryption id: 0xFFFF / 0xFFFE / 0xFF80 = plain; 0, 1, 2, 0x11, 0x80, 0x8002 = OpenMG DRM (gemini
+  copies key material from +0x40 / +0x50 / +0x58). Protected files are refused before anything reaches the DSP:
+  hbplayer shows "Archivo protegido (DRM)" and skips (files SonicStage transferred with protection, e.g. the
+  device's own OMGAUDIO/10Fxx/1000xxxx.OMA, are of this kind).
+  [0x20] codec id: 0 ATRAC3, 1 ATRAC3plus, 3 MP3, 4 LPCM, 5 WMA, 0x21 AAL (ATRAC3plus base), 0x22 AAL (ATRAC3
+  base) [version 3 only for AAL; gemini's codec table also routes 0x20 to the AAL parser].
+  ATRAC3 [0x21] bit1 joint stereo, [0x22] bits 7-5 rate index (0 32k, 1 44.1k, 2 48k), frame = 10-bit * 8.
+  ATRAC3plus [0x22] bits 7-5 rate, bits 4-2 channel id (1 mono, 2 stereo), frame = 10-bit * 8 + 8.
+  AAL [0x21] bits 7-6 block samples, [0x22] bits 7-6 rate (0 44.1k, 1 48k, 2 96k), bits 5-4 word length
+  (0 16, 1 24); base layer params at [0x31..0x33] in the ATRAC3plus / ATRAC3 layout.
+
+== Status
+- AT3 / ATX: implemented in dspdec + hbplayer (dec.c routes .oma/.aa3/.omg; no ARM fallback: a DSP error ends
+  the track and the engine skips). UNTESTED on the device. Test file: research/dsp/test/test_at3.oma (made by
+  mk_test_oma.py: hand-written ATRAC3 LP2 frames, 3 s ~775 Hz tone left, 3 s right, 3 s both, 1 s silence at
+  -30 dBFS; verified with ffmpeg's atrac3 decoder through PyAV: exactly that). boot_dsee.sh part 6 decodes it
+  with "dspdec - -d at3 ..." (expect RESULT rc=0, ~10 s, STATS L/R about -30 dBFS).
+- AAL: implemented from the RE above but speculative (per-buffer private u16 unknown, block framing guessed
+  from the separator); needs a real file (SonicStage "ATRAC Advanced Lossless", unprotected). 24-bit AAL refused.
+- Not done: WMA (WMAD.FTB) and AAC (AACD.FTB) - the helper protocol has room for them ("O seq off wma path").
+
+== Making test files on a PC (no ATRAC encoder here)
+- research/dsp/test/mk_test_oma.py [out.oma]: the synthetic ATRAC3 file above (--check out.oma decodes it with
+  PyAV/ffmpeg: pip install av).
+- Real ATRAC3 (LP2 / LP4): the open-source encoder atracdenc (github.com/dcherednik/atracdenc), e.g.
+  atracdenc -e atrac3 -i in.wav -o x.oma (44.1 kHz 16-bit stereo WAV in; check its README for the exact
+  options / bitrate switch). ATRAC3plus: Sony's at3tool (PSP SDK) makes RIFF .at3 files; ffmpeg remuxes those
+  without re-encoding: ffmpeg -i x.at3 -c copy x.oma (ffmpeg writes EA3 version 0, which our parser accepts).
+  SonicStage: only files it writes WITHOUT copy protection work (e.g. if its conversion / export offers an
+  unprotected ATRAC option); files from a normal SonicStage transfer are DRM-protected and are refused.

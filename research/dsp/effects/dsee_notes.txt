@@ -1,0 +1,68 @@
+DSEE on the NW-A829 DSP - why +0x0c = 0x0f did nothing, and experiment 4 (2026-09-28)
+Previous results (H:\HB\out\fx, experiment 3): st_dsee / ab_dsee / ab_toggle / pcm_st_dsee / pcm_sweep_dsee are
+bit-identical in level and HF1/HF2 to their bypass runs, while VPT, EQ and the dynamic normalizer clearly work
+through the same page with the same handshake (+04 goes back to 0: the DSP consumed the block). Clear Stereo
+(cs=1) was ALSO a no-op (st_cs1 == st_bypass; pcm_lr_cs1: right channel stays silent).
+
+== gemini's DSEE chain (re-checked)
+DuiSoundEffectManager::SetDsx (0x15e204) -> APCAudioCtrl (0x24e91c / 0x24fdc8) -> 0x253884 -> AudioC_SetDsx
+0x2c5868: accepts 0/1 only when AudioC is initialised (0x557fe4 == 1), stores 0 / 0x0f in the settings copy
+(0x6aecac) and calls the commit 0x2c487c. The commit (full disassembly this time):
+  - output device (0x6aecd8) > 1 (BT / line / cradle): copies the bypass block, and with 0x2c453c() == 1 sets
+    level -4263 and Clear Stereo 0x8001; +0x1e = 1 for devices 1 / 3 / 5.
+  - headphones: +0x0c DSEE, +0x0e normalizer, +0x10 VPT, +0x14 Clear Stereo (0x8001 forced when the "source"
+    0x6ae7dc > 0, else the table value), +0x12 level = /etc/AudioC_VolTbl[0xe0 + 2 * volume step] when the
+    source <= 1, else a fixed value (line-in / radio), +0x18 EQ.
+  Nothing else: no second DSEE field, no other page, no OMX call. So the ARM side of DSEE is exactly what
+  dspfx wrote, EXCEPT that gemini never writes level 0 (bypass) with DSEE on: it always carries the volume
+  table level (-727 at volume steps 0..14).
+The decoder side: GapOmfUtil's MP3 builder puts the stream bitrate in kbps at +0x12 of the MP3D parameter block
+(0x27 = 39 only when it has none) and a stream flag at +0x14; both travel with every input buffer to the DSP
+(DSP cmd 0x0a). dspdec / dspfx always sent 0x27. gemini's LPCM builder leaves them 0 (lossless source).
+
+== Where DSEE probably lives: the non-FTB firmware
+omf_dsp_manager.mp201 for "audio" (render: the DSP plays to the codec itself) vs "audio_ftb" (PCM back to the
+ARM, what we use): resident DSP code at 0x400 is 0x99d88 bytes vs 0x70de0 (168 KB less in FTB), and the effect
+page offset constant 0x4A0000 appears 40x vs 36x. Two effects are dead in FTB mode (DSEE and Clear Stereo),
+three work. gemini has both kinds of player components: FTB decoders (GapAT3DecoderCmp "OMX.SONY.AT3D.FTB",
+GapMP3DecoderCmp ...) next to a BT PCM renderer that writes /dev/sound/adsp (GapBTLPCMRenderCmp), and render
+components without .FTB (GapAT3RenderCmp "OMX.SONY.AT3D", GapATXRenderCmp, GapAALRenderCmp, "audio" cfg, driver
+mode 0). Its commit writes the BYPASS block for outputs > 1 (BT / line), i.e. exactly where the PCM has to
+come back to the ARM. Not verified which chain it uses for headphones, but the likely picture is: render chain
+for headphones, FTB chain for BT, and DSEE / Clear Stereo implemented only in the render firmware (the FTB one
+kept VPT / EQ / normalizer).
+
+== Experiment 4 (effects/boot_dsee.sh, results in H:\HB\out\dsee\)
+dspfx additions: -a SECS:SPEC (A/B alternation inside one run, STATS seg0 = A periods, seg1 = B periods, 0.3 s
+after each switch skipped), ">11k" / ">16k" = energy of the mid signal above 11.5 / 16 kHz (4th-order
+Butterworth high-pass) relative to the mid energy, mp3r = render mode (DriverMode 0, omx_nw_walkman_audio.cfg,
+OMX.NEC.EL.MP3D - same parameter offsets as the FTB block, only an input port; -V sets the codec volume).
+Runs (A = -x block, B = -a block, 3 s each, 12 s, FTB unless noted):
+  ab_base      audiobook, +0x12 = 0x27 as before                         (reproduces experiment 3 with A/B)
+  ab_br64      +0x12 = 64 (real bitrate)                                 hypothesis: DSEE needs the bitrate
+  ab_br64_f14  +0x12 = 64, +0x14 = 1                                     ... and the stream flag
+  ab_br32 / ab_br0   +0x12 = 32 / 0
+  ab_p0_7      MP3D +0 = 7 (range 6..7, meaning unknown)
+  ab_dsx1 / ab_dsxff / ab_dsxffff   page value 1 / 0xff / 0xffff instead of 0x0f
+  ab_gain      page level -727 in A and B (gemini's normal headphone block; 0 is its bypass value)
+  ab_flag      + page +0x1e = 1
+  ab_eqflat    DSEE on top of a running flat EQ (in case the chain needs another stage active)
+  st_br128     the 128 kbps podcast, +0x12 = 128, level -727 (look at >16k: content ends near 16 kHz)
+  pcm_br64     LPCMD with +0x12 = 64 / +0x14 = 1 on experiment 3's DSP-decoded audiobook WAV
+  at3_test / at3_noflag   ATRAC3 test file through dspdec (not DSEE: first device test of the ATRAC path)
+  r_vpt / r_dsee / r_cs   RENDER mode listening test (positive control VPT, then DSEE, then Clear Stereo)
+What to look for:
+- FTB runs: seg1 ">11k" clearly above seg0 (several dB; for the 22 kHz audiobook seg0 should be very low,
+  ~-40 dB or less) = DSEE works with that variant. Equal numbers = still dead. Check each run's "PARAM set"
+  line: SetParameter must accept the value (r=0) or the run tested nothing new.
+- Render runs: no numbers (nothing comes back). Listen: r_vpt must change audibly every 4 s (if not, render
+  mode or the page does not work there and r_dsee says nothing). r_dsee: B periods brighter / crisper sibilants
+  = DSEE exists only in the render firmware -> for the player that means: DSEE only if we move wired playback
+  to render mode (the DSP drives the codec; our PCM would go in through the non-FTB OMX.NEC.EL.LPCMD, no BT,
+  our own ARM EQ / time-stretch before it). r_cs the same for Clear Stereo.
+- page dumps (page_boot / page_mid / page_end) as before; rc 2/3 or a kill in the render runs = mode 0 playback
+  has a problem (then the device needs a reboot before hbplayer uses the DSP again).
+Risks: the render runs are the first time the DSP drives the codec from our code (mode 0 set_pcm_int_mode:
+DSP_RESET + Sony's PCM DMA ioctl + SETFMT 0x800 on /dev/sound/dsp); worst case silence or a stuck run (killed
+after 60 s), fixed by a reboot. Volume 60 is about -10 dB: moderate, but take the headphones off the ears for
+the first seconds of r_vpt.

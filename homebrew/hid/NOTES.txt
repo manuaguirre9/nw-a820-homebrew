@@ -1,0 +1,111 @@
+Bluetooth HID device (remote control / keyboard) for the NW-A829 - notes
+=========================================================================
+
+Files
+  btcm.c/.h        copy of homebrew/net/btcm.c extended: several L2CAP channels, accept, SDP, name, CoD, scan
+  peercom_env.h    copy of homebrew/net/peercom_env.h; SC part extended (BOND_IND/BOND_CFM decode, PIN log)
+  hid.c/.h         HID device: SDP record, report descriptor, PSM 0x11/0x13, HIDP control, input reports,
+                   host file + reconnect
+  hidtest.c        spike: keys of /dev/input/event0 -> HID, status on the screen, log on stderr
+  build_hid.sh     zig build (same recipe as net/build_pantest.sh) -> hidtest (41 KB, GLIBC_2.4 only)
+  boot_hidtest.sh  one-shot boot block (guard /contents/HB/out/hid_done, output /contents/HB/out/hid/)
+  re/              kodis.py, hci_bchs.ko, all.dis (copied from the session scratchpad),
+                   primtab.py -> primtab.txt: every (type number, primitive) registered by
+                   CM/SC/SD/AV/AVRCP/BCCMD_init_converter (add_serialize_f calls, with a tiny register tracker)
+                   ser_dump.txt: field order of the serializers used here
+
+Primitive numbers and wire layouts (big-endian, u16 type first; from Serialize_/Deserialize_X_T)
+  CM (class 0x104, queue 0xd), downstream:
+    0x00 CM_SET_LOCAL_NAME_REQ        u16 type, u16 phandle, char name[41] (fixed, NUL padded)
+    0x1c CM_WRITE_SCAN_ENABLE_REQ     u16, u16 phandle, u8 disableInquiryScan, u8 disablePageScan
+                                      (cmWriteScanEnableReqHandler/returnConnectAbleParameters: they are DISABLE flags)
+    0x1e CM_CONNECTABLE_REQ           u16, u16 phandle, u8 connectable
+    0x23 CM_WRITE_COD_REQ             u16, u16 phandle, u32 cod -> only service bits (13..23) survive
+    0x39 CM_WRITE_MAJOR_MINOR_COD_REQ u16, u16 phandle, u32 major (&0x1f00), u32 minor (&0xfc)
+         returnClassOfdevice(): CoD = OR(listening accepts' cod, WRITE_COD, ...) with bits 0..12 replaced by
+         major|minor. So the device class MUST go through 0x39.
+    0x42 CM_L2CA_REGISTER_REQ         u16, u16 phandle, u16 psm, u8 n, n bytes
+    0x43 CM_L2CA_CONNECT_REQ          u16, u16 phandle, u16 nap, u8 uap, u32 lap, u16 lpsm, u16 rpsm, u16 mtu,
+                                      u16 flush, u16 secl, u8 qos(0)
+    0x44 CM_L2CA_CONNECT_ACCEPT_REQ   u16, u16 phandle, u16 psm, u32 cod, u16 secl, u16 mtu, u16 flush,
+                                      u16 profile uuid, u8 qos(0)   (Cml2caConnectAcceptReq_struct; AV uses
+                                      it for PSM 0x19 with mtu 0x2a0, uuid 0x110d). 6 accept slots in the CM;
+                                      one accept = one incoming connection. Also registers SC security (secl).
+    0x45 CM_L2CA_CANCEL_CONNECT_ACCEPT_REQ  u16, u16 phandle, u16 psm
+    0x46 CM_L2CA_DISCONNECT_REQ       u16, u16 cid
+    0x57 CM_SDS_REGISTER_REQ          u16, u16 phandle, u16 len, bytes: attribute id/value pairs, ascending,
+                                      NO outer sequence and NO 0x0000 handle (format of Sony's AVRCP records,
+                                      .rodata+0x574 in hci_bchs.ko)
+    0x58 CM_SDS_UNREGISTER_REQ        u16, u16 phandle, u32 handle
+    0x68 CM_L2CA_DATA_REQ             u16, u16 cid, u16 len, data
+  CM upstream:
+    0x8015 SDS_REGISTER_CFM   u16, u32 handle, u8 result      0x8016 SDS_UNREGISTER_CFM (same)
+    0x8017 L2CA_REGISTER_CFM  u16, u16 psm
+    0x8018 L2CA_CONNECT_CFM / 0x8019 L2CA_CONNECT_ACCEPT_CFM:
+           u16, u16 cid, u8 result, u16 psm, u16 mtu, u32 lap, u8 uap, u16 nap   (no separate CONNECT_IND:
+           the ACCEPT_CFM is the "incoming connection" event)
+    0x801a CANCEL_CONNECT_ACCEPT_CFM, 0x801b DATA_CFM (u16, u16 cid, u8 result), 0x801c DATA_IND,
+    0x801d DISCONNECT_IND (u16, u16 cid, u8 reason), 0x8021 MODE_CHANGE_IND,
+    0x802f SET_LOCAL_NAME_CFM (u16, u8), 0x8036 WRITE_COD_CFM (u16, u8), 0x8061 WRITE_MAJOR_MINOR_COD_CFM (u16, u8)
+  SC (class 0x102, queue 0xe):
+    0x8000 PASSKEY_IND  u16, u32 cod, u32 lap, u8 uap, u16 nap, name  -> answered by sc_handle with the PIN
+    0x8001 BOND_CFM     u16, u8 result, u32 lap, u8 uap, u16 nap, u32 cod, u8
+    0x8006 BOND_IND     u16, u32 lap, u8 uap, u16 nap, u32 cod, u8 result, u8 added   (host paired with us)
+    0x02   DEBOND_REQ   u16, u16 phandle, u32 lap, u8 uap, u16 nap
+
+Security levels (BlueStack SECL_*): IN_AUTHORISATION 1, IN_AUTHENTICATION 2, IN_ENCRYPTION 4,
+  OUT_AUTHORISATION 8, OUT_AUTHENTICATION 0x10, OUT_ENCRYPTION 0x20. Incoming accepts use 0x0006 (HID_SECL
+  env to change), outgoing reconnect uses 0x0028 like net/btcm.c.
+
+SDP record (347 bytes, verified by parsing it back): 0x0001 {HID 0x1124}; 0x0004 {{L2CAP,0x11},{HIDP}};
+  0x0005 {PublicBrowseGroup}; 0x0006 {en, UTF-8, 0x100}; 0x0009 {{HID,0x0101}}; 0x000D {{{L2CAP,0x13},{HIDP}}};
+  0x0100 name; 0x0101/0x0102 strings; 0x0200 0x0100; 0x0201 ParserVersion 0x0111; 0x0202 Subclass 0xC0;
+  0x0203 Country 0; 0x0204 VirtualCable 1; 0x0205 ReconnectInitiate 1; 0x0206 {{0x22, descriptor 102 bytes}};
+  0x0207 {{0x0409,0x0100}}; 0x0209 BatteryPower 1; 0x020A RemoteWake 1; 0x020B ProfileVersion 0x0100;
+  0x020C SupervisionTimeout 0x0C80; 0x020D NormallyConnectable 1; 0x020E BootDevice 0.
+Report descriptor: ID 1 keyboard (8 bytes: mods, reserved, 6 keys; output 5 LED bits),
+  ID 2 consumer (1 byte bits: PlayPause CD, Next B5, Prev B6, Vol+ E9, Vol- EA, Mute E2, AC Back 224, AC Home 223).
+Input report: interrupt channel 0xA1 0x01 <8 bytes> or 0xA1 0x02 <bits>; boot protocol: 0xA1 <8 bytes>.
+
+Pairing flow / class of device
+  The BlueCore4 is BT 2.0: legacy PIN pairing only, no SSP. We answer every PIN request with "0000" (HID_PIN).
+  Default CoD 0x002580 = Peripheral / pointing device. Why not "keyboard" (0x002540): Android's
+  BondStateMachine treats PERIPHERAL_KEYBOARD / KEYBOARD_POINTING as "show a random PIN to type ON the
+  keyboard" (DISPLAY_PIN) and Windows does the same; we cannot know that PIN. With pointing CoD Android's
+  stack auto-answers 0000 (btif_dm pin_request: COD_HID_POINTING auto-pair) when the phone starts the pairing;
+  if it does not, it shows a PIN field: type 0000. Other CoDs (remote control 0x00250C) always show the PIN
+  field. The CoD does not limit what the device can send: the report descriptor decides (keyboard + media).
+  Override: HID_COD=0x00250C hidtest ...
+
+What to do on the phone (S23+)
+  1. Walkman shows "Esperando conexion". Phone: Settings > Connections > Bluetooth > scan, tap
+     "Walkman NW-A829 Remote". If a PIN is asked, type 0000.
+  2. The phone connects the HID channels by itself after pairing; screen says "Conectado".
+  3. Next runs: hidtest reconnects to the stored host (/var/hb/bt/hid_host) at start; BT short press retries.
+  PC (Windows): Settings > Bluetooth & devices > Add device > Bluetooth; if a PIN is asked, 0000.
+
+Keys: media mode: PLAY play/pause, RIGHT/LEFT next/prev, UP/DOWN arrows, VOL+/- volume, BACK Esc (back on
+  Android). OPTION toggles slides mode: PLAY Enter, RIGHT/LEFT arrows, UP/DOWN PageUp/PageDown.
+  BT short: reconnect; BT held 2 s: quit. HOLD on (codes | 0x80): keys ignored.
+
+Log checklist (/contents/HB/out/hid/hidtest.log)
+  "local address ..."                      stack is up
+  "set name cfm result 0", "write major/minor cod cfm result 0"
+  "sdp register cfm handle 0x... result 0" + "SDP record registered"   (if result != 0: record format problem)
+  "psm 0x11 registered", "psm 0x13 registered", "accepting on psm 0x11/0x13"
+  pairing: "sc: PIN requested by XXXX:XX:XXXXXX ... answered", "sc: bond indication ... result 0",
+           "sc_db: new record" (link key stored)
+  connection: "accept cfm psm 0x11 ... result 0x00", "control channel up", "accept cfm psm 0x13",
+              "HID connected", "hid: state ... -> connected"
+  HIDP: "control rx: 70" (SET_PROTOCOL report) etc.; keys: "hid: media Play/Pausa press"
+  unknown primitives are hex-dumped as "btcm: cm prim 0x...."
+
+Open risks
+  - Never run on the device yet. Scan-enable semantics (disable flags), the accept CFM psm field and the
+    SDS record format are inferred from the disassembly and Sony's own records, not tested.
+  - Whether the CM lets two accepts (0x11 and 0x13) be pending at once: the handler has 6 slots, so it
+    should; if the 0x13 accept fails (result 8) hid_tick retries every second.
+  - Android may ignore the pointing-CoD auto 0000 (interop list, not locally initiated) -> type 0000.
+  - Sniff mode: we do not force active mode; if key latency is poor, call btcm_l2_active(cid) after sending.
+  - Sony's AV module in the same kernel stack may also be registering records/accepts (A2DP); no conflict
+    expected (different PSMs).

@@ -1,0 +1,81 @@
+AAC and WMA on the NW-A829 DSP - reversing notes and implementation (2026-09-28)
+Sources: rootfs_omf/omf/omf_mc_aacd_ftb.so (notes/aacd_ftb_full.dis), omf_mc_wmad_ftb.so (notes/wmad_ftb_full.dis),
+bin_ref/gemini-ICX1115 (notes/gem_omfutil.dis, gem_aacdec.dis, gem_adtssep.dis; effects/gdis.py).
+
+== OMX.NEC.EL.AACD.FTB (same NEC framework as MP3D.FTB, notes/mp3d_notes.txt)
+Pools: input phys 0x33E40000 0xC000 = 24 x 0x800 (2048), output 0x33EA4000 24 x 0x2000.
+EmptyThisBuffer: nFilledLen 1..0x800, BYTE-SWAPPED in place like MP3D (OmfMcConvertEndian); nFlags 0x20000 = clear
+the input queue first. DSP cmd 0x0a (0x30 bytes): {0x0a, len, +2, +4, +8, +a, +c, +e, nFlags, pBuffer, phys, +12,
++14, nTickCount, nTimeStamp}. Idle->Exec DSP cmd 1 (0x20 bytes): {1, 0x33E40000, 0x800, 0x18, +2, +4, +6, +8, +a, +c,
++e, +10, +0}.
+Parameter block 0xFF000001 (u16, Set only in Loaded) - defaults / accepted ranges (SetParameter 0x382c):
+  +0   6  6..7    (same field as MP3D +0; MP3D with 7 gave full-scale noise in out/dsee ab_p0_7 = output byte order)
+  +2   2  1..2    output channels
+  +4   1  1..3    gemini: 0x2dc02c(stream[4]) 0->1 1->2 2->3; for AAC most likely the audio object type
+                  (ADTS profile + 1: 1 Main, 2 LC, 3 SSR)
+  +6   3  3..4    output rate code (4 = 44.1 kHz)
+  +8   2  0 or 2  gemini format table (0x2dc1c4 builder): format 5 -> 0, format 6 -> 2. Format 5 also gets the
+                  real channel code (+a 1/2) and the real sample-rate code (+c 3..11); format 6 always +a 2, +c 3.
+                  Interpretation: 0 = raw access units (rate / channels from the parameters, MP4), 2 = ADTS
+                  (self-describing headers; 1seg/DTV HE-AAC). NOT confirmed.
+  +a   2  1..2    input channels (format 5)
+  +c   3  3..11   sample-rate code 3=48k 4=44.1k 5=32k 6=24k 7=22.05k 8=16k 9=12k 10=11.025k 11=8k (no 64k+)
+  +e   0  -103..103 (signed; also in Config)  unknown, gemini 0
+  +10  1  0..1    gemini builder writes 0, the AAC cmp (0x2dd370) sets 1 when its 3rd argument is set: probably SBR
+  +12  0  stored  bitrate kbps (gemini: stream[0xc] if 1..0x3fc, else 0x17) - per input buffer, DSEE
+  +14  0  stored  gemini: stream[0x14] != 0 - per input buffer
+Config 0xFF000002 (any state): Set +0 6..7, +2 1..2, +4 1..3, +6 3..4, and the 5th u16 -> +e.
+gemini decoder cmp (0x2dd370): component "OMX.NEC.EL.AACD.FTB" (".CPU.FTB" in video mode 4), 24 x 0x800 in,
+24 x 0x2000 out, in both its AAC (type 5) and HEAAC (type 6) variants.
+
+== OMX.NEC.EL.WMAD.FTB
+Pools: input 0x33E40000 0x18000 = 24 x 0x1000 (4096), output 0x33EA4000 24 x 0x2000.
+Parameter block 0xFF000001: user struct 0x2c bytes (the internal copy is packed differently: user +0x12..+0x16 ->
+internal +0x10..+0x14). Defaults: +0 6, +2 2, +4 1, +6 3, +8 5, +a 2, +c 3, rest 0. SetParameter checks (0x3864):
+  +0  6..7       +2 1..2 output channels     +6 3..4 output rate code      +8 must be 5
+  +a  1..2 channels    +c rate code, one of 3 4 5 7 8 10 11 (48 44.1 32 22.05 16 11.025 8 kHz)
+  +12 / +14 stored (bitrate / flag, as MP3D +12/+14)
+  +16 u16 format tag: MUST be 0x161 (WMA v2 only; 0x160 v1, 0x162 Pro, 0x163 Lossless refused)
+  +18 u32 average bytes per second: > 15 and < 2 * sample rate
+  +1c u16 block align: != 0
+  +1e u16 bits per sample: must be 16
+  +20 u32, +24 u16, +28 u32: stored, not checked (WMAv2 extradata: +20 samples per block? / +24 encode options /
+      +28 super block align? - to be confirmed from gemini's WMA builder)
+gemini format table: format 2 = WMA (+8 5, rate codes 3 4 5 7 8 10 11, channels 1/2 -> 1/2).
+gemini's WMA decoder cmp (0x2de70c): OMX.NEC.EL.WMAD.FTB, 24 x 0x1000 in, 24 x 0x2000 out; generic builder, then
++12 = stream kbps (0x2f = 47 when unknown / > 0x3fc), +14 = stream flag, and from its ASF stream info the
+WAVEFORMATEX part: +16 u16 tag, +18 u32 avg bytes/s, +1c u16 block align, +1e u16 bits, +20 u32 / +24 u16 / +28 u32
+= the WMA 2 extradata (dwSamplesPerBlock, wEncodeOptions, dwSuperBlockAlign). The non-FTB WMAD validates the same.
+
+== What dspdec / the player do (2026-09-28, UNTESTED on the device - once_dsp3.sh parts 2 and 3)
+AAC (homebrew/dspdec/aacinfo.h):
+- MP4 (.m4a / .mp4): the player keeps demuxing with minimp4 (no second copy of the sample tables in the helper:
+  12 bytes per access unit, ~18 MB for a 10 h audiobook). dec.c parses the AudioSpecificConfig; if the DSP can take
+  it (object type 1..3, 1..2 channels, 8..48 kHz, 1024-sample frames) it sends "M seq 0 rate ch aot sbr kbps 0"
+  and then one "A len" command per access unit, keeping 12 with the helper (ACK packets report consumed AUs).
+  Parameters: +4 object type, +8 0 (raw), +a channels, +c rate code of the core rate, +10 SBR signalled, +12 kbps.
+  The helper puts one access unit per 2 KB input buffer (the component byte-swaps it, as MP3D does).
+- ADTS (.aac): the helper reads the file itself ("O seq off aac path"), one frame per buffer; default headers
+  stripped (+8 0, same as MP4); test option -A 2 = whole frames with +8 2 / +a 2 / +c 3 like gemini's format 6.
+- FAAD2 stays: it is initialised on every open and takes over at the current position when the DSP refuses the
+  stream (start error, SetParameter refusal) or fails later. HE-AAC / HE-AAC v2 are sent to the DSP with +10 = 1
+  and the core rate (UNTESTED, no HE file here: once_dsp3.sh uses H:\HB\bin\test_he.m4a if it exists, once as is
+  and once with +c = the rate code of the SBR output rate).
+WMA (homebrew/dspdec/asf.h):
+- ASF header: File Properties (packet size, duration - preroll), the audio Stream Properties (WAVEFORMATEX +
+  extradata), Content Encryption / Extended Content Encryption / Digital Signature objects = DRM -> refused
+  ("Archivo protegido (DRM)"); only tag 0x161, 16 bits, 1..2 channels, the 7 rates, avg bytes < 2 x rate
+  ("Formato WMA no soportado" otherwise: WMA 1 / Pro / Lossless / voice).
+- data packets -> the audio stream's payloads (single / multiple / compressed payloads; after a seek from the next
+  media object start); whole nBlockAlign blocks per 4 KB input buffer (split if a block is bigger). Verified on
+  the PC: the extracted bytes equal ffmpeg's demuxed packets for both test files.
+- DSP only (no WMA decoder on the ARM): an error skips the track like ATRAC. Seeks are proportional to the data
+  size, rounded to a packet.
+Test files (research/dsp/test/mk_test_aacwma.py, PyAV): test_aac.m4a / test_aac.aac (same LC stream, 44.1 kHz
+stereo 128 kbps), test_aac22m.m4a (22.05 kHz mono), test_wma.wma (WMA 2 44.1 kHz stereo 128 kbps),
+test_wma22m.wma (22.05 kHz mono 32 kbps): 12 s, 440 Hz left 4 s, 660 Hz right 4 s, both 4 s, -15 dBFS rms;
+test_aac_long.m4a: 75 s of chords + noise for the CPU comparison. ffmpeg's WMA encoder writes extradata with
+samples-per-block 0 and encode options 1 (Microsoft's encoder: other values) - once_dsp3.sh also tries +0x20 =
+2048. What to look for: RESULT decoded ~12 s, errors 0; STATS L / R about -16.8 dBFS (the 12 s average of the
+pattern), 22m files mono (L = R); the raw files (44.1k stereo S16) on the PC: python mk_test_aacwma.py --check is
+for encoded files - load the .raw with numpy for the per-segment check.

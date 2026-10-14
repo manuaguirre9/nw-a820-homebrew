@@ -1,0 +1,3 @@
+# Name | RSS URL | how many of the newest episodes to keep
+# Copy to H:\Podcasts\feeds.txt (used by the player's on-device downloads and by podsync.py).
+My Podcast | https://feeds.example.com/my-podcast.xml | 5

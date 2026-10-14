@@ -1,0 +1,120 @@
+Sony sound effects on the NW-A829 DSP - reversing notes (2026-09-27)
+Sources: bin_ref/gemini-ICX1115 (stripped; addresses below are gemini vaddrs), rootfs_omf/omf/*,
+/etc/AudioC_VolTbl from firmware_work/fw/jp_file3.dec (a tar of the rootfs). Tools: effects/gdis.py
+(disassemble a range of an ARM executable with string annotation), effects/blx.py (BL callers),
+scripts/xref.py (literal-pool xrefs). Disassembly kept in audioc_init.dis, audioc_set.dis, sfxmgr.dis,
+lpcmd_ftb.dis, mp3d_cfg.dis.
+
+== 1. OMX.NEC.EL.PS is NOT post-processing
+omf_me_ps.mp201 (audio, audio_ftb and video dirs) is named "ME_PowerSave" in its header. The cfg lists it
+first but there is no omf_mc_ps.so, and neither gemini nor mptapp contain the string "OMX.NEC.EL.PS".
+It is the DSP's idle/power-save engine, nothing to chain.
+
+== 2. The decoder components carry no effect parameters
+omf_mc_mp3d(.ftb) / omf_mc_lpcmd(.ftb) Get/SetParameter/Config know only 0xFF000001 / 0xFF000002 (the
+codec/format block). gemini imports only OMX_Init/Deinit/GetHandle/FreeHandle/DriverMode.
+
+== 3. Where the effects really go: a shared page at phys 0x33EA0000
+gemini's AudioC library (init at 0x2c7418): open("/dev/mem", O_RDWR|O_SYNC), mmap 0x1000 bytes at
+phys 0x33EA0000 (just below the decoder output pool 0x33EA4000, inside the DSP window 0x33A00000..),
+memset(first 0x20 bytes, 0). All effect setters end in the commit function 0x2c487c:
+    P[+0x08] = 1                        ARM lock
+    while (P[+0x0a] != 0) ;             DSP busy flag
+    copy 20 bytes to P+0x0c..P+0x1f     (word stores)
+    P[+0x04] = 1                        "new settings"
+    P[+0x08] = 0
+The DSP code polls it; the window offset 0x4A0000 appears as a 32-bit constant 40x in
+audio/omf_dsp_manager.mp201 and 36x in audio_ftb/omf_dsp_manager.mp201 (the InterDSP mailbox offset
+0x5E0000 shows up the same way; the runtime-passed buffer pool offsets do not), so the FTB decoders we
+use very likely read it too. To be confirmed by the dspfx test (watch +04/+0a in the PAGE dumps).
+
+Block (u16 unless noted), with the UI entry points (DuiSoundEffectManager -> APCAudioCtrlService -> AudioC):
+  +0x0c  DSEE ("SetDsx", 0x253884 -> 0x2c5868)     0 off, 0x0f on (only 0/1 accepted, 1 stored as 0xf)
+  +0x0e  Dynamic Normalizer (0x2538b0 -> 0x2c5924) 0 / 1
+  +0x10  VPT ("SetVpt", 0x2538f8 -> 0x2c5af4)       -1 (0xffff) off, 0..5 = six modes (UI icons
+         indicator_vpt_a/c/l/s/k/m); range check -1..5
+  +0x12  s16 level from /etc/AudioC_VolTbl, u16 table at byte 0xe0 indexed by the volume step 0..31:
+         -727 for steps 0..14, then -1198 .. -8508 at 31 (fixed -8508 for line/radio sources).
+         0 in the bypass block. Probably a volume-dependent headroom/limiter level (unit unknown).
+  +0x14  u32 Clear Stereo ("SetChSep", 0x2538dc -> 0x2c59c8): index 0..2 into {0x8001 (off), -38, -34};
+         the two levels are tunable (0x2c5a6c accepts -83..-20). 0x8001 is also forced for sources > 0.
+  +0x18  u32 EQ ("SetEqMode" 0x253924 -> 0x2c5b9c, custom 0x2c5c40):
+           mode 0 off         0xfffffffe
+           mode 1 Heavy       0x03224322
+           mode 2 Pop         0x04332233
+           mode 3 Jazz        0x02343322
+           mode 4 Unique      0x01432311
+           mode 5/6 Custom1/2 packed from 6 band values b1..b6 (each 0..6, 3 = 0 dB):
+                              b1 | b1<<4 | b2<<8 | b3<<12 | b4<<16 | b5<<20 | b6<<24
+           (anything else: 0x03333333 flat). All presets have nibble0 == nibble1, i.e. the same packing.
+           Six bands (frequencies not verified; Sony players of this era use 100/400/1k/2.5k/6.3k/16k,
+           see firmware_work/manual_NW-A820_jp.pdf; the pcm_sweep_eq run measures them). Whether a LOWER
+           value means boost or cut is not clear from the ARM side (Unique = 1,3,2,3,4,1 suggests lower =
+           more level at the ends); the dspfx run st_eq_0to6 / pcm_sweep_eq (b1=0, b6=6) settles it.
+  +0x1c  u16 0;  +0x1e u16 1 when the output device (AudioC_AudioOut_Set, 0x2c5dac) is 1, 3 or 5
+  AVLS is NOT in the block: it is a volume cap applied on the ARM side (0x253c88).
+Output devices > 1 (BT / line / cradle, from AudioC_AudioOut_Set) get the bypass block
+  {0, 0, 0xffff, 0, 0x8001, 0xfffffffe}.
+State: settings can be committed at any time, gemini does it from the UI while playing; the DSP picks
+them up via the +04 flag. dspfx -t tests a live change.
+
+== 4. Consequences for our code
+- Effects are NOT tied to gemini's player graph: any process that owns the DSP can write the page.
+- dspfx writes the page exactly like gemini (same handshake, same word stores).
+- Apply to arbitrary PCM with OMX.NEC.EL.LPCMD.FTB (below): FLAC / AAC-on-ARM / podcasts / game audio
+  can be pushed through the DSP for DSEE / VPT / EQ / Clear Stereo, if the DSP applies them to LPCM (DSEE
+  is meant for lossy sources; the test shows whether Sony skips it for LPCM).
+- Cost: PCM round trip ARM->DSP->ARM is a memcpy per 12 KB; the DSP does the work.
+
+== 5. OMX.NEC.EL.LPCMD.FTB (omf_mc_lpcmd_ftb.so) - linear PCM "decoder"
+Same framework as MP3D.FTB (notes/mp3d_notes.txt): 2 ports, AllocateBuffer only, sizes must match:
+  port 0 input:  phys 0x33E40000, 0x48000 bytes, 24 x 0x3000 (12288)
+  port 1 output: phys 0x33EA4000, 0x30000 bytes, 24 x 0x2000 (8192)
+Parameter block 0xFF000001 (user struct, u16, Set only in Loaded), defaults and accepted ranges:
+  +0   6   6..7      (same field as MP3D +0, meaning unknown, keep 6)
+  +2   2   1..2      (probably output channels, keep 2)
+  +4   1   -         not settable
+  +6   3   3..4      OUTPUT rate code: 3 = 48 kHz, 4 = 44.1 kHz
+  +8   6   6..7      input byte order: 6 = native little-endian S16, 7 = big-endian (component swaps
+                     the buffer in place before sending, OmfMcConvertEndian)
+  +a   2   1..2      INPUT channels
+  +c   3   3..11     INPUT rate code 3=48k 4=44.1k 5=32k 6=24k 7=22.05k 8=16k 9=12k 10=11.025k 11=8k
+  +12  0   stored    (internal +0x10), sent with every buffer
+  +14  0   stored    (internal +0x12), sent with every buffer
+  (+e internal, 0, sent with every buffer; not settable)
+Config 0xFF000002: Get returns +0,+2,+4,+6,+e; Set changes +0 (6..7), +2 (1..2), +6 (3..4) in any state.
+EmptyThisBuffer: nFilledLen 1..0x3000 and a multiple of 2*channels, data at pBuffer, nFlags EOS = 1,
+0x20000 = reset input queue. DSP cmd 0x0a {len, +2, 6, +a, +c, +e, nFlags, pBuffer, phys, +10, +12,
+nTickCount, nTimeStamp}. Input is 16-bit only (no 24-bit, no > 48 kHz). So LPCMD is also a sample-rate
+converter (any of the 9 input rates -> 44.1 or 48 kHz).
+
+== 6. dspfx (effects/dspfx.c, build with effects/build.sh)
+  dspfx page | dspfx mp3|pcm [-x SPEC] [-t SEC:SPEC] [-s SECS] [-P off=val] [-r 3|4] OUT.wav IN
+  IN for pcm: a 16-bit WAV or gen:RATE:CH:SECS[:lr] (log sweep 20 Hz..0.45 RATE, -12 dBFS).
+  SPEC: bypass | dsee=0|1 | dn=0|1 | vpt=off|0..5 | cs=off|1|2|<int> | eq=off|flat|heavy|pop|jazz|unique|
+        b1:b2:b3:b4:b5:b6 | eqraw=<hex> | gain=<int> | flag=<int>   (starts from the bypass block)
+  Prints PAGE dumps (start / init / before+after each commit / every 2 s / end), PARAM/CONFIG blocks,
+  FORMAT, and STATS per segment (split at -t): level L/R, side/mid ratio, HF1/HF2 (1st/2nd-difference
+  energy of mid vs mid energy).
+boot_fx.sh runs: page at boot; MP3 raw / bypass / dsee (podcast and audiobook) / live toggle / vpt0 /
+vpt3 / cs1 / dn / eq heavy / eq 0:3:3:3:3:6; LPCMD sweeps (bypass, eq, dsee, L-only with vpt0 and cs1),
+22.05k mono and 48k resampling, the podcast WAV back through LPCMD (bypass, dsee, vpt0); ratetest.
+
+What to look for:
+- PAGE dumps: after a commit +04 = 0001; if the DSP consumes it, +04 goes back to 0000 (or +0a toggles)
+  in the "run" dumps. +04 staying 1 and identical WAVs = FTB decoders ignore the page.
+- st_dsee vs st_bypass / ab_dsee vs ab_bypass: HF1/HF2 higher with DSEE (esp. the 22 kHz audiobook,
+  whose content stops near 8-11 kHz); ab_toggle seg1 vs seg0 the same. Spectrogram on the PC.
+- vpt / cs: side/mid ratio changes (pcm_lr_*: left-only sweep, so any right-channel energy is VPT/CS
+  crosstalk). eq: level changes; pcm_sweep_eq vs pcm_sweep_bypass over time = the EQ curve (sweep is
+  logarithmic 20 Hz -> 19.8 kHz over 10 s), which also tells whether b=0 is boost or cut.
+- pcm_2205_mono / pcm_48k: FORMAT and duration (output should be 44.1k stereo, 8 s -> 8 s).
+- Differences between raw and bypass mean the page was already doing something at boot (page_boot).
+Risks: writing 32 bytes of DSP shared RAM that nothing else uses at boot (gemini is not running); worst
+case a confused DSP task -> dspfx stalls (rc 2/3), audio broken until reboot (gemini reloads the DSP).
+The busy-wait on +0a is bounded (0.5 s).
+
+== 7. Follow-up (2026-09-28)
+DSEE and Clear Stereo were no-ops in FTB mode: analysis and experiment 4 (boot_dsee.sh, dspfx -a / mp3r) in
+dsee_notes.txt. The player now routes FLAC / AAC / libmad PCM through LPCMD when a Sony effect is on
+(notes/player_dsp_notes.txt).

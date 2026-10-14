@@ -1,0 +1,89 @@
+DIRECT playback ("Máxima batería"): the DSP decodes AND plays to the codec - notes (2026-09-28)
+Sources: rootfs_omf/omf/omf_mc_{mp3d,aacd,wmad,at3d,atxd}.so (non-FTB, notes/*_full.dis), libomf_core_hw_dep.so
+(notes/hw_dep_audio.dis), gemini GapMP3RenderCmp (notes/gem_mp3render.dis, 0x2d0b78..0x2d1370), kernel sources
+src/sound/oss/mp200-audio.c (PCM_DMA_INT_SET) and icx1087-sound.c, src/arch/arm/mach-mp200/dma.c. Earlier device
+runs: H:\HB\out\dsee\r_*.txt (dspfx mp3r). Implementation: homebrew/dspdec (R / Z / X commands, -r test mode),
+homebrew/hbplayer dspclient.c / dec.c / engine.c. Device test: research/dsp/test/once_dsp3.sh part 1 and 4.
+
+== The mechanism (confirmed from the binaries)
+1. OMX_DriverMode(0) before OMX_Init("/usr/lib/omf/omx_nw_walkman_audio.cfg") (the "audio" firmware, 170 KB more
+   resident DSP code than audio_ftb). OmfUserSystemInit -> audio_codec_open(2, 44100): open("/dev/sound/dsp",
+   O_WRONLY|O_NONBLOCK), open(mixer, O_WRONLY), SETFMT S16, CHANNELS 2, SPEED 44100. No volume write: the codec
+   keeps the volume the player set through /dev/sound/mixer. The fds stay open until OMX_Deinit
+   (OmfUserSystemDeinit -> audio_codec_close): while the helper is in this mode nobody else can use the output.
+2. Components without ".FTB": ONE port (input), 24 input buffers from AllocateBuffer (MP3D 0x1000, AACD 0x800,
+   AT3D / ATXD 0x800, AALD / LPCMD 0x3000, WMAD 0x1000 bytes), FillThisBuffer = NotImplemented. The parameter
+   block has the same user layout as the FTB one (the first u16 is simply ignored); the validators are the same
+   (non-FTB MP3D 0x37e8: +2 1..2, +4 1..3, +6 3..4, +8 == 4; AACD 0x37f8 and WMAD 0x3830 = the FTB checks).
+   gemini's MP3 render builder (0x2d0d28): {6, 2, version code, 4, 4, channel code, rate code, 0, -, bitrate
+   (0x27 if > 0x3fc), stream flag} - the same values dspdec sends.
+3. Idle -> Executing: OmfMcAudioInit(h, 1) -> audio_codec_set_pcm_int_mode(1) (skipped when the core is in
+   driver mode 1): SNDCTL_DSP_RESET, ioctl 0x40044404 PCM_DMA_INT_SET(1), SETFMT 0x800 (S32), CHANNELS, SPEED.
+   Kernel (mp200-audio.c): PCM_DMA_INT_SET(PCM_INT_DSP_MODE) frees the ARM's PCM interrupt and routes the M2P
+   DMA channel LCH4 (PCM0 TX) interrupt to the DSP (PCM_DMA_M2P_INT_SEL |= LCH4); from then on ARM writes to
+   /dev/sound/dsp get -EPERM and the DSP drives PCM0 through LCH4 (DMA_M2P_LCH4_MODE bit 4 = 16/32-bit).
+   Executing -> Idle: OmfMcAudioDeinit(h, 0) -> set_pcm_int_mode(0): back to the CPU, S16.
+4. Data: EmptyThisBuffer as in FTB (MP3D / AACD byte-swap in place, EOS = nFlags bit 0); DSP cmd 0x0a carries
+   no timestamps in the non-FTB components. EmptyBufferDone per buffer the decoder consumed.
+5. Position: nothing reports a play time (Get/SetConfig only has the parameter fields). gemini's render cmp
+   (0x2d0c04) forwards the EmptyBufferDone with the buffer's nTickCount / nTimeStamp - its own values - to its
+   framework: gemini's clock = timestamp of the last input buffer the DSP consumed. dspdec does the same: each
+   input buffer carries its end time (source seconds since the session start) and file offset (AU count for
+   access-unit streams); POS packets report the latest EmptyBufferDone's values. They lead what is heard by the
+   DSP's internal PCM buffering (a fraction of a second; to be measured by the -r test: pace).
+6. End: DSP message 8 -> EventBufferFlag (event 4) - the only end signal (no FBD). dspdec waits 0.2 s after it,
+   then reports EOS; fallback: all input consumed and 3 s without an EmptyBufferDone.
+7. Pause: SendCommand(StateSet, Pause) from Executing -> DSP cmd 2 (OmfMcPauseDSP); StateSet(Executing) resumes.
+   Seek: Executing -> Idle (buffers dropped) -> Executing with the new data (dspdec restarts the session).
+8. Effects: the same page at phys 0x33EA0000. The earlier render runs showed the DSP consuming it (+04 back to 0)
+   and, in r_dsee, +0x1c = 1 after DSEE was switched on with the bitrate known - the same status word the FTB
+   runs with a working DSEE show (ab_br64 / st_br128). DSEE therefore runs in both firmwares when +0x12 of the
+   decoder parameters carries the real bitrate; Clear Stereo is still unverified.
+
+== Earlier device evidence (out/dsee r_vpt / r_dsee / r_cs, dspfx mp3r)
+OMX_Init(direct) = 0, GetHandle(OMX.NEC.EL.MP3D) = 0, SetParameter accepted, Idle / Executing reached, no stall
+(inputs kept being consumed for 16-32 s), page consumed, DSEE status set. Errors: 0x80001007 (underflow before
+data) and 0x90001001 (DSP error 1; the same test_st.mp3 also gives it in FTB mode, which decodes fine). Not
+logged: EmptyBufferDone timing, so nothing proved the DSP was actually playing (and nobody confirmed hearing it).
+
+== Proof without a listener (dspdec -r)
+- pace = seconds of input the DSP consumed / wall seconds. A DSP decoding into nowhere would run at its decode
+  speed (MP3 ~1.4x / ATRAC 4.5x realtime in FTB mode) once its buffers are full; a DSP paced by the DAC settles
+  at 1.00 after the initial prebuffer.
+- the PCM DMA channel: M2P logical channel 4 parameters at phys 0x40091400 (aadd +0, aadp +4 source pointer,
+  leng +0x40, rcount +0x44, wcount +0x48, mode +0x50), M2P control status 0x40099004, PCM0 TXRX_MON 0x400C0004,
+  read-only through /dev/mem once a second. The source pointer moving inside the DSP window (0x33A00000 ..
+  0x34000000) = the DSP feeds the codec. REGS lines at boot / after OMX_Init / at Executing / at the end.
+  VERDICT line: moving in >= half of the samples.
+- /proc/interrupts "interdsp" / "audio io" counts in the REGS lines (the ARM's PCM interrupt must NOT count up).
+
+== dspdec protocol additions (see dspdec.c header)
+R <seq> <off> <codec> <path>   direct session (mp3 at3 atx aal aac(ADTS) wma); core switch to mode 0 if needed
+M <seq> 1 ...                  direct AAC access-unit stream (MP4 demuxed by the player, "A" / "E" as in FTB)
+Z 1|0                          pause / resume          X <seq>   leave direct mode (OMX_Deinit), answered by REL
+POS packets (flag 16, struct dpos {ms, off, ebds, state}): once when the session runs ("started"), then every
+0.25 s, written non-blocking (a player that doesn't read can't stall the DSP feed). EOS / ERR as before.
+Core switch FTB <-> direct = OMX_Deinit + OMX_Init with the other cfg (DSP firmware reload, ~0.3-0.5 s from the
+OMX_Init times in earlier logs). O / P / M 0 switch back to FTB by themselves.
+
+== Player integration (dspclient.c, dec.c, engine.c)
+- engine want_direct(): setting dsp_direct ("Máxima batería") or HB_DIRECT=1, DSP enabled, no Bluetooth, no ARM EQ,
+  no speech speed change, ReplayGain off. MP3 / ATRAC / WMA / AAC-LC (MP4 and ADTS); FLAC never.
+- dec_set_direct() before dec_open: the file is opened (headers, Xing, MP4 index, FAAD2 / libmad kept ready as
+  fallbacks) but the helper session starts at the first dec_direct_step (after the resume seek).
+- eng_frame: dec_direct_step (non-blocking poll of POS packets; AU streams: keeps ~160 access units ahead);
+  position / resume from the helper (MP3 resume bytes = Xing TOC / bitrate mapping of the position); end ->
+  advance; failure -> dec.c continues the same file on the normal path at that position (FTB DSP, else libmad /
+  FAAD2); conditions changed mid-track (Bluetooth connected, EQ / speed on) -> reopen_here() on the other path.
+- pause parks the session: stop + X (the codec is free for bells / focus mode / games / Bluetooth) and resumes
+  0.5 s before the reported position (the DSP had consumed a bit more than was heard). eng_stop releases too.
+- every aout_start / aout_start32 in the engine is preceded by dsp_direct_release() (a no-op unless the helper
+  may hold the device).
+- no fade-in, no gapless trimming, no software volume in direct mode; track changes restart the session (short gap).
+
+== Open points / risks
+- If a direct run is SIGKILLed mid-session, the kernel's PCM interrupt stays in DSP mode (ARM writes -EPERM) until
+  a process sets it back or a reboot: the test script sends SIGTERM first (dspdec tears down cleanly).
+- Volume keys in direct mode need audio.c to apply the codec volume without an open /dev/sound/dsp (see the
+  summary to the settings/audio owner).
+- Pace / latency numbers, Clear Stereo, AAC / WMA / ATRAC in direct mode: first measured by once_dsp3.sh.

@@ -1,0 +1,83 @@
+OMX.NEC.EL.MP3D.FTB - protocol notes (2026-09-27), reversed from
+  rootfs_omf/omf/omf_mc_mp3d_ftb.so  (notes/mp3d_ftb.dis, mp3d_ftb_2dd8.dis, mp3d_ftb_3710.dis)
+  bin_ref/mptapp + bin_ref/gemini-ICX1115 (same "GAP" player framework; mpt_*.dis)
+  rootfs_omf/omf/libomf_core_hw_dep.so (hw_dep_audio.dis)
+Tools: scripts/sodis.py (named funcs), scripts/rdis.py (address range, skipdata), scripts/xref.py
+(literal-pool xrefs), scripts/annot.py (string annotation). Device libc/libpthread copies in devlib/.
+
+== Core / driver mode
+- gemini/mptapp (OmfMgr_setMode): cfg by mode 0/4 video, 1 audio, 2 dtv, 3 audio_ftb. For modes 3 and 4
+  they call OMX_DriverMode(&1) BEFORE OMX_Init, else OMX_DriverMode(&0). OMX_DriverMode takes an int*.
+- Mode 0: OmfUserSystemInit -> audio_codec_open(2, 44100) opens /dev/sound/dsp (O_WRONLY|O_NONBLOCK) and
+  /dev/sound/mixer, S16_LE/2ch/44100. Experiment 1 ran in this mode (harmless). Mode 1: the core never
+  touches /dev/sound/*; the app owns the PCM device (FTB = PCM comes back to the ARM, app writes it).
+- OmfMcAudioInit(h,1) (called at Idle->Executing) takes the core's audio mutex and, only in mode 0,
+  set_pcm_int_mode(1): DSP_RESET, ioctl 0x40044404 (Sony PCM_DMA_INT_SET), SETFMT 0x800, restore speed/ch.
+
+== Component basics
+- OMX_COMPONENTTYPE nSize 0x50, nVersion 1; component version 0x05000203 (checked against DSP reply).
+- 2 ports: 0 = input (MP3), 1 = output (PCM). Fixed pools in DSP shared memory, mapped via /dev/mem:
+    port 0: phys 0x33E40000, 0x18000 bytes, 24 x 4096
+    port 1: phys 0x33EA4000, 0x30000 bytes, 24 x 8192
+- UseBuffer, GetExtensionIndex, ComponentTunnelRequest -> 0x80001006 NotImplemented. No vendor
+  extension strings. SendCommand supports only StateSet (Flush/PortDisable/Enable/MarkBuffer: not
+  implemented; mptapp strings say "(OViA not supported) ..." for PortSettingsChanged/Flush/etc).
+- AllocateBuffer(h, &hdr, port, appPriv, size): only in Loaded (state 1, i.e. before the command
+  thread processed Idle); size must EQUAL the pool buffer size (4096 / 8192) else BadParameter;
+  max 24 per port. The Loaded->Idle handler polls until BOTH ports are fully populated (24+24).
+- Buffer header = standard OMX 1.0 (0x50): pBuffer=virtual addr in the pool, nAllocLen, pPlatformPrivate
+  = phys | index (low 5 bits), pInputPortPrivate (+0x20) is used as the component's queue link,
+  nOutputPortIndex=1 on output headers / nInputPortIndex=0 on input headers.
+- Command thread: message box; per-state tables of {msg, handler, next state}. Handlers:
+    Loaded->Idle   wait populated, EventCmdComplete(StateSet, 2)
+    Idle->Exec     OmfMcAudioInit + DSP cmd 1 (0x20 bytes: 1, input pool phys, 0x1000, 0x18, param
+                   +2,+4,+6,+8,+a,+c, audio-init result, param+0) sync, EventCmdComplete(StateSet,3)
+    Exec->Idle     DSP cmd 0 (stop) sync + AudioDeinit; buffers still held by the DSP are DROPPED
+                   (no EBD/FBD), queues cleared, EventCmdComplete(StateSet,2)
+    Idle->Loaded   wait until every buffer freed (FreeBuffer works in any state), CmdComplete(1)
+    Exec<->Pause   DSP cmd 2 (pause/resume)
+  Errors in a handler turn into EventError(err). Sync DSP commands wait 4000 ms (OmfWaitSignal).
+- GetState maps internal 6 -> 4.
+
+== Parameters (vendor, NO nSize/nVersion header; plain u16 fields; only index 0xFF000001/0xFF000002)
+GetParameter/SetParameter(0xFF000001, p): Set only in Loaded. User struct (0x16 bytes):
+  off  default  Set-range   gemini sets              guess
+  +0   6        6..7        6                        ?
+  +2   2        1..2        2                        ?
+  +4   1        1..3        f(stream[4]) 0->1,1->2,2->3   MPEG version (1,2,2.5) or sample-rate index
+  +6   3        3..4        4                        ?
+  +8   4        ==4         4 (PCM out type 1)       output format code
+  +a   2        (not set)   out channels code        output channels (stays 2)
+  +c   3        (not set)   out rate code (3=48k,4=44.1k..11=8k; always 3 for PCM type 1)
+  +12  0        stored      0x27, or stream[0xc] if 1..0x3fc
+  +14  0        stored      stream[0x14] != 0
+  (+e reads back 0; +10 untouched). Set rejects out-of-range with 0x80001019 UnsupportedSetting.
+  +12/+14 are sent to the DSP with EVERY input buffer, +2..+c too.
+GetConfig/SetConfig(0xFF000002): first 4 u16 (+0..+6) of the same block, settable in any state.
+Nothing reports the decoded sample rate/channels back (no PortSettingsChanged): gemini takes them from
+its own MP3 parser (GapMP3Parser/MP3Parser_getMPEGInfo). dspmp3 infers them from bytes per frame.
+
+== Data flow
+- EmptyThisBuffer: nFilledLen must be 1..4096; data must start at pBuffer (nOffset ignored); the
+  component BYTE-SWAPS the buffer in place (16-bit words, DSP is 16-bit) before sending DSP cmd 0x0a
+  (len, params, nFlags, pBuffer, phys, param +12/+14, nTickCount, nTimeStamp). nFlags 0x20000 = reset
+  input queue first (vendor). EOS = nFlags bit 0 on the last buffer.
+- gemini's pipeline is file -> GapMP3Separator (frames, "dequeueFrame", seqnum) -> decoder, so input is
+  probably frame-aligned; dspmp3 packs whole frames per 4 KB buffer by default (-m f / -m r variants).
+- FillThisBuffer: DSP cmd 0x0e (pBuffer, phys). Allowed in Idle or Executing.
+- DSP -> ARM notifications (type 1): 4 = input done (EBD only if payload[+0xc] < 0), 10 = output done
+  (FBD: nFilledLen=payload[+0xc], nFlags=payload[+0x18], nTickCount, nTimeStamp; if nFlags&1 also
+  EventBufferFlag(port 1, EOS)), 8 = EventBufferFlag(0, 1), 5 = error (1 -> 0x90001001, 2 ->
+  StreamCorrupt 0x8000100b), 2 = Underflow 0x80001007, 0x200/0x201 = 0x90001002/3, 0xffff = Hardware.
+  PCM is NOT byte-swapped by the component (dspmp3 checks LE vs BE smoothness).
+- Callbacks run on the component thread / the InterDSP receiver thread (LinuxThreads processes).
+- OMX.NEC.EL.PS in the ftb cfg = post-processing (Sony effects), not needed in the decode chain.
+
+== dspmp3 (test/dspmp3.c)
+DriverMode(1), Init, GetHandle, Get/Set param, Idle + 24/24 AllocateBuffer, Executing, FTB all, feed ETB,
+EOS on FBD -> Idle -> Loaded + FreeBuffer -> FreeHandle -> Deinit. Callbacks -> pipe (no pthread symbols:
+zig versions pthread_* GLIBC_2.4; device libpthread-0.10 has GLIBC_2.0..2.3.2 only; libomf_core_os_dep
+DT_NEEDs libpthread itself so LinuxThreads is initialised). CPU: /proc/*/stat utime+stime of us + our
+thread processes (getrusage SELF only sees the main thread under LinuxThreads), system busy from /proc/stat,
+sink (md5/wav/play) CPU reported separately. Exit 0 = EOS + PCM, 1 = init/state failure, 2 = no EOS /
+stalled (5 s without callbacks), 3 = watchdog.
