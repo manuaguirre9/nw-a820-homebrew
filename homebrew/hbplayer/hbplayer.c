@@ -561,7 +561,7 @@ void idle_tick(int playing)
 	}
 	battery_update();
 	usb_check();
-	if (warm_poll()) music_preload();	/* the first visit of Música then opens at once */
+	{ int w = warm_poll(); if (w) { music_preload(w == 2); warm_covers_start(); } }	/* the first visit of Música then opens at once, its covers ready */
 	bt_poll();
 	eng_tick();
 	cpu_governor();
@@ -805,8 +805,9 @@ int pos_get(const char *path, long *bytes, int *sec)
 	return 1;
 }
 
-/* settings changes are written a few seconds after the last one (a toggle used to rewrite and fsync pos.txt on
- * the spot: a visible hitch per key); suspend, power off, pause and track changes save right away anyway */
+/* settings changes and playback positions (pause, skip, track picked) are written 5 s after the first one (each
+ * used to rewrite and fsync pos.txt on the spot: a visible hitch per key); suspend, power off, USB and leaving the
+ * player save right away */
 static double settings_since;
 void settings_save(void) { pos_dirty = 1; if (!settings_since) settings_since = now(); }
 static void settings_flush(void) { if (settings_since && now() - settings_since > 5) { settings_since = 0; pos_save(); } }
@@ -845,7 +846,8 @@ static int list_dir(const char *root, int dirs, const char *ext, int desc)
 	while ((e = readdir(d))) {
 		if (e->d_name[0] == '.') continue;
 		if (n >= MAXITEMS) { over++; continue; }
-		char p[PATHLEN]; snprintf(p, sizeof p, "%s/%s", root, e->d_name);
+		char p[PATHLEN];
+		if (!fs_path(root, e->d_name, p, sizeof p)) continue;	/* a '?' in the name and no short name: it can't be opened */
 		/* the type from readdir when the filesystem gives it (no stat per entry: on FAT each one searches the
 		 * directory again); stat only when it doesn't */
 		int isdir, isreg;
@@ -930,6 +932,7 @@ void nowplaying_run(void)
 	int lr_key = -1, scrub = 0;
 	double lr_t = 0, scrub_pos = 0, scrub_t = 0;
 	char chapline[120];
+	double t_in = now();	/* the first frame's preparation, for the timing line below */
 	wake();
 	for (;;) {
 		if (!eng_active()) { pending_slide = -1; return; }
@@ -975,6 +978,7 @@ void nowplaying_run(void)
 			pv.show_lrc = show_lrc;
 			ui_st.playing = e.paused ? 2 : 1;
 			scr_player(&pv, full);
+			if (t_in) { double ms = (now() - t_in) * 1000; if (ms > 60) lg("ui: player screen drawn in %d ms (cover %s)", (int)ms, has_art ? "cached" : "later"); t_in = 0; }
 			if (full) flip(); else gfx_flip();
 			full = 0; lastsec = e.sec;
 			/* the title is on screen: now decode the cover (never with the screen off: it waits for the wake-up) */
@@ -1128,6 +1132,9 @@ static void back_to_sony(void) { leave_player("Volviendo al Walkman...", 0); }
 static void usb_check(void)
 {
 	static int fd = -2; static time_t last;
+#ifdef HB_DEV
+	if (getenv("HB_NOUSB")) return;	/* device tests started with the cable in: the PC waits until they are done */
+#endif
 	if (time(0) == last) return;
 	last = time(0);
 	if (fd == -2) { fd = open("/dev/usbconn", O_RDONLY); if (fd >= 0) fcntl(fd, F_SETFD, FD_CLOEXEC); }
@@ -1349,7 +1356,8 @@ static int fo_thumbs_pending(void)
 			struct dirent *e; int n = 0;
 			int nw = 0;
 			while ((e = readdir(d))) if (e->d_name[0] != '.' && dec_is_audio(e->d_name)) {
-				char fp[PATHLEN + 256]; snprintf(fp, sizeof fp, "%s/%s", folders[i].path, e->d_name);
+				char fp[PATHLEN + 256];
+				if (!fs_path(folders[i].path, e->d_name, fp, sizeof fp)) continue;
 				if (!first[0]) snprintf(first, sizeof first, "%s", fp);
 				if (pos_peek(fp) < 0) nw++;	/* never played */
 				n++;

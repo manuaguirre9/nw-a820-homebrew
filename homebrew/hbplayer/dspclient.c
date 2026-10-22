@@ -44,6 +44,8 @@ int dsp_direct = 1;	/* setting "Máxima batería": wired playback decoded and pl
 
 /* direct sessions */
 static int holding;		/* the helper is (or may be) in direct mode: it has /dev/sound/dsp open */
+static uint32_t rel_seq;	/* a release (X) sent whose confirmation hasn't come yet (dsp_direct_release_poll) */
+static double rel_t;
 static struct dpos dpos;
 static int dir_state;		/* 1 running, 0 ended, -1 failed */
 static double dir_heard;	/* last position report: a session that goes quiet has failed */
@@ -176,7 +178,7 @@ void dsp_stop_helper(void)
 	if (to_fd >= 0) close(to_fd);
 	if (from_fd >= 0) close(from_fd);
 	pid = -1; to_fd = from_fd = -1; pcm_len = pcm_pos = 0; rx_len = 0; fifo_n = 0; mode = M_NONE;
-	holding = 0; au_on = 0;	/* the process is gone: so is its hold on /dev/sound/dsp */
+	holding = 0; au_on = 0; rel_seq = 0;	/* the process is gone: so is its hold on /dev/sound/dsp */
 }
 
 static void fail(const char *why)
@@ -237,7 +239,10 @@ static int send_all(const void *buf, int n, int ms)
 	}
 	return 0;
 }
-static int send_cmd(const char *s) { return send_all(s, (int)strlen(s), 2000); }
+static void finish_release(void);
+/* a command while a release is still unconfirmed: the release first (waiting for this command's own reply would
+ * throw the release's confirmation away) */
+static int send_cmd(const char *s) { if (rel_seq) finish_release(); return send_all(s, (int)strlen(s), 2000); }
 
 /* wait up to ms for a packet of seq s with one of the flags in mask (control packets are processed, older
  * seqs dropped); returns its flags, -1 on timeout / helper failure */
@@ -479,21 +484,53 @@ void dsp_direct_pause(int p)
 	dir_heard = now();	/* a pause is not silence */
 }
 
-/* the helper leaves direct mode (closes /dev/sound/dsp); call before opening the audio device. Blocks until it
- * confirmed (normally < 0.3 s); a no-op when it isn't holding the device */
+static void finish_release(void)
+{
+	uint32_t s = rel_seq;
+	rel_seq = 0;
+	if (wait_flags(s, PF_REL, 4000) < 0 && pid > 0) fail("release timeout");	/* killing it frees the device too */
+	else lg("dsp: direct mode released (%d ms)", (int)((now() - rel_t) * 1000));
+}
+
+/* the helper leaves direct mode (closes /dev/sound/dsp) before anything else opens the device. This one doesn't
+ * wait, for the engine: it sends the release once, then 1 = the device is free, 0 = not confirmed yet (asked again
+ * on the next step). A direct song followed by a FLAC used to hold the keys ~0.3 s in one call */
+int dsp_direct_release_poll(void)
+{
+	if (holding) {
+		holding = 0;
+		if (pid <= 0 || to_fd < 0) return 1;
+		char c[24];
+		uint32_t s = ++cur_seq;
+		snprintf(c, sizeof c, "X %u\n", s);
+		if (mode == M_DIR || mode == M_DEC) mode = M_NONE;
+		au_on = 0;
+		if (send_cmd(c)) { fail("write"); return 1; }
+		rel_seq = s; rel_t = now();
+	}
+	for (int pumped = 0; rel_seq; pumped = 1) {
+		struct pkt p; unsigned char *d;
+		int r = rx_peek(&p, &d);
+		if (r < 0) { fail("garbage from helper"); return 1; }
+		if (r == 1) {
+			int f = p.seq == rel_seq ? (int)p.flags : 0;
+			if (p.seq == rel_seq) ctl_packet(&p, d);
+			rx_drop(&p);
+			if (f & PF_REL) { lg("dsp: direct mode released (%d ms, without waiting)", (int)((now() - rel_t) * 1000)); rel_seq = 0; }
+			continue;
+		}
+		if (now() - rel_t > 4) { rel_seq = 0; if (pid > 0) fail("release timeout"); return 1; }
+		if (pumped) return 0;
+		if (rx_pump(0) < 0) { fail("helper gone"); return 1; }
+	}
+	return 1;
+}
+
+/* the waiting form (normally < 0.3 s); a no-op when the helper isn't holding the device */
 void dsp_direct_release(void)
 {
-	if (!holding) return;
-	holding = 0;
-	if (pid <= 0 || to_fd < 0) return;
-	char c[24];
-	uint32_t s = ++cur_seq;
-	snprintf(c, sizeof c, "X %u\n", s);
-	if (mode == M_DIR || mode == M_DEC) mode = M_NONE;
-	au_on = 0;
-	if (send_cmd(c)) { fail("write"); return; }
-	if (wait_flags(s, PF_REL, 4000) < 0 && pid > 0) fail("release timeout");	/* killing it frees the device too */
-	else lg("dsp: direct mode released");
+	if (holding) dsp_direct_release_poll();	/* sends it (and may already see the confirmation) */
+	if (rel_seq) finish_release();
 }
 
 

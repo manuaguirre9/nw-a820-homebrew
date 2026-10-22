@@ -21,10 +21,11 @@ static int nlib;
 /* library cache: the tags of every file with its size and date, so entering Música only stats the files and reads
  * the tags of new / changed ones (it used to open and parse every file on the first visit after each boot) */
 #define LIBCACHE "/contents/HB/cache/library.bin"
-#define LIBMAGIC 0x3342494cUL	/* "LIB3": songs carry the year */
+#define LIBMAGIC 0x3442494cUL	/* "LIB4": FLAC tags read (LIB3 had FLAC files by their file names) */
 static struct song *old;	/* the cache being matched during a scan (sorted by path) */
 static int nold, cache_hits, cache_dirty;
 static int quiet, gave_up;	/* music_preload: no messages, stop at the first file the cache lacks */
+static int bg;	/* music_build_cache, in the warm process: no messages, no UI or audio, no log (the player's) */
 
 static int cmp_path(const void *a, const void *b) { return strcmp(((const struct song *)a)->path, ((const struct song *)b)->path); }
 
@@ -127,15 +128,80 @@ static void genre_fix(char *g, int max)
 
 static unsigned syncsafe(const unsigned char *p) { return (p[0] & 127) << 21 | (p[1] & 127) << 14 | (p[2] & 127) << 7 | (p[3] & 127); }
 
+/* UTF-8 text into a field, cut at a character boundary when it doesn't fit; only fills an empty field (the first
+ * TITLE= etc. wins) */
+static void set_utf8(char *dst, int max, const char *v, int n)
+{
+	if (dst[0]) return;
+	if (n > max - 1) { n = max - 1; while (n > 0 && ((unsigned char)v[n] & 0xC0) == 0x80) n--; }
+	memcpy(dst, v, n); dst[n] = 0;
+	while (n > 0 && dst[n - 1] == ' ') dst[--n] = 0;
+}
+
+static unsigned le32(const unsigned char *p) { return p[0] | p[1] << 8 | p[2] << 16 | (unsigned)p[3] << 24; }
+
+/* FLAC: the VORBIS_COMMENT metadata block ("TITLE=...", UTF-8; keys in any case). Big entries (lyrics, an
+ * embedded picture) are skipped without reading them */
+static int read_flac_tags(int fd, long off, struct song *s, char *aartist, int aamax)	/* 1: a FLAC file */
+{
+	unsigned char b[4];
+	if (lseek(fd, off, SEEK_SET) < 0 || read(fd, b, 4) != 4 || memcmp(b, "fLaC", 4)) return 0;
+	off += 4;
+	for (int blocks = 0; blocks < 128; blocks++) {
+		if (lseek(fd, off, SEEK_SET) < 0 || read(fd, b, 4) != 4) return 1;
+		unsigned len = (unsigned)b[1] << 16 | b[2] << 8 | b[3];
+		if ((b[0] & 127) == 4) break;
+		if (b[0] & 128) return 1;	/* the last block, no comments */
+		off += 4 + len;
+	}
+	unsigned len = (unsigned)b[1] << 16 | b[2] << 8 | b[3], left = len;
+	if (left < 8 || read(fd, b, 4) != 4) return 1;
+	unsigned vlen = le32(b);	/* vendor string */
+	left -= 4;
+	if (vlen > left - 4 || lseek(fd, vlen, SEEK_CUR) < 0 || read(fd, b, 4) != 4) return 1;
+	left -= vlen + 4;
+	unsigned count = le32(b);
+	char c[512];
+	for (unsigned i = 0; i < count && i < 1000 && left >= 4; i++) {
+		if (read(fd, b, 4) != 4) return 1;
+		unsigned n = le32(b);
+		left -= 4;
+		if (n > left) return 1;
+		left -= n;
+		if (n >= sizeof c) { if (lseek(fd, n, SEEK_CUR) < 0) return 1; continue; }
+		if (read(fd, c, n) != (ssize_t)n) return 1;
+		c[n] = 0;
+		char *eq = memchr(c, '=', n);
+		if (!eq) continue;
+		*eq = 0;
+		const char *v = eq + 1; int vn = (int)(c + n - v);
+		if (!strcasecmp(c, "TITLE")) set_utf8(s->title, sizeof s->title, v, vn);
+		else if (!strcasecmp(c, "ARTIST")) set_utf8(s->artist, sizeof s->artist, v, vn);
+		else if (!strcasecmp(c, "ALBUM")) set_utf8(s->album, sizeof s->album, v, vn);
+		else if (!strcasecmp(c, "ALBUMARTIST") || !strcasecmp(c, "ALBUM ARTIST")) set_utf8(aartist, aamax, v, vn);
+		else if (!strcasecmp(c, "GENRE")) set_utf8(s->genre, sizeof s->genre, v, vn);
+		else if ((!strcasecmp(c, "DATE") || !strcasecmp(c, "YEAR")) && strspn(v, "0123456789") >= 4 && !s->year[0]) snprintf(s->year, sizeof s->year, "%.4s", v);
+		else if (!strcasecmp(c, "TRACKNUMBER") && !s->trk) s->trk = atoi(v);
+	}
+	return 1;
+}
+
 static void read_tags(const char *path, struct song *s)
 {
 	int fd = open(path, O_RDONLY);
 	if (fd < 0) return;
 	unsigned char h[10];
+	char aartist[64] = "";	/* album artist (TPE2 / ALBUMARTIST): the artist when a file names no other */
+	long flac_off = 0;	/* where "fLaC" should be: after an ID3v2 tag some taggers put in front */
 	if (read(fd, h, 10) == 10 && !memcmp(h, "ID3", 3) && h[3] >= 2 && h[3] <= 4) {
+		flac_off = 10 + (long)syncsafe(h + 6) + (h[5] & 0x10 ? 10 : 0);
 		int v = h[3];
 		unsigned tsz = syncsafe(h + 6), pos = 10, hdr = v == 2 ? 6 : 10;
 		unsigned char f[10], d[512];
+		if (v >= 3 && (h[5] & 0x40) && read(fd, f, 4) == 4) {	/* extended header: v2.4 counts its own 4 bytes, v2.3 doesn't */
+			unsigned ext = v == 4 ? syncsafe(f) : (unsigned)f[0] << 24 | f[1] << 16 | f[2] << 8 | f[3];
+			pos = ext < tsz ? 10 + ext + (v == 4 ? 0 : 4) : tsz + 10;
+		}
 		while (pos + hdr <= tsz + 10) {
 			if (lseek(fd, pos, SEEK_SET) < 0 || read(fd, f, hdr) != (ssize_t)hdr || !f[0]) break;
 			unsigned fsz = v == 2 ? (unsigned)(f[3] << 16 | f[4] << 8 | f[5]) : v == 4 ? syncsafe(f + 4) : (unsigned)(f[4] << 24 | f[5] << 16 | f[6] << 8 | f[7]);
@@ -144,6 +210,7 @@ static void read_tags(const char *path, struct song *s)
 			if (!memcmp(f, v == 2 ? "TT2" : "TIT2", v == 2 ? 3 : 4)) { dst = s->title; dmax = sizeof s->title; }
 			else if (!memcmp(f, v == 2 ? "TP1" : "TPE1", v == 2 ? 3 : 4)) { dst = s->artist; dmax = sizeof s->artist; }
 			else if (!memcmp(f, v == 2 ? "TAL" : "TALB", v == 2 ? 3 : 4)) { dst = s->album; dmax = sizeof s->album; }
+			else if (!memcmp(f, v == 2 ? "TP2" : "TPE2", v == 2 ? 3 : 4)) { dst = aartist; dmax = sizeof aartist; }
 			else if (!memcmp(f, v == 2 ? "TCO" : "TCON", v == 2 ? 3 : 4)) { dst = s->genre; dmax = sizeof s->genre; }
 			else if (!memcmp(f, v == 2 ? "TRK" : "TRCK", v == 2 ? 3 : 4)) istrk = 1;
 			else if (v == 2 ? !memcmp(f, "TYE", 3) : !memcmp(f, "TYER", 4) || !memcmp(f, "TDRC", 4)) istrk = 2;	/* year (v2.4: a date) */
@@ -159,8 +226,12 @@ static void read_tags(const char *path, struct song *s)
 			pos += hdr + fsz;
 		}
 	}
+	int flac = read_flac_tags(fd, flac_off, s, aartist, sizeof aartist);
+	if (!s->artist[0] && aartist[0]) snprintf(s->artist, sizeof s->artist, "%s", aartist);
 	if (s->genre[0]) genre_fix(s->genre, sizeof s->genre);
-	if (!s->title[0] || !s->artist[0] || !s->genre[0] || !s->year[0]) {	/* ID3v1 */
+	/* ID3v1, at the very end: not looked for in FLAC files (seeking to the end of a 100 MB file walks its whole
+	 * FAT cluster chain, and FLAC never carries one in practice) */
+	if (!flac && (!s->title[0] || !s->artist[0] || !s->genre[0] || !s->year[0])) {
 		unsigned char t[128];
 		if (lseek(fd, -128, SEEK_END) > 0 && read(fd, t, 128) == 128 && !memcmp(t, "TAG", 3)) {
 			unsigned char b[31];
@@ -183,7 +254,8 @@ static void scan(const char *dir, int depth, const char *folder)
 	struct dirent *e;
 	while ((e = readdir(d)) && nlib < MAXT) {
 		if (e->d_name[0] == '.') continue;
-		char p[PATHLEN]; snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+		char p[PATHLEN];
+		if (!fs_path(dir, e->d_name, p, sizeof p)) { if (!bg) lg("music: can't open \"%s/%s\" (its name has characters this Walkman can't show, and no short name)", dir, e->d_name); continue; }
 		struct stat st;
 		if (stat(p, &st)) continue;
 		if (S_ISDIR(st.st_mode)) { scan(p, depth + 1, e->d_name); if (gave_up) break; continue; }
@@ -197,8 +269,10 @@ static void scan(const char *dir, int depth, const char *folder)
 		cache_dirty = 1;
 		s->size = (long)st.st_size; s->mtime = (long)st.st_mtime;
 		read_tags(p, s);
-		ui_tick();
-		if (!(nlib % 20)) { char b[48]; snprintf(b, sizeof b, "%d canciones", nlib); message("Música", "Leyendo la biblioteca...", b); }
+		if (!bg) {
+			ui_tick();
+			if (!(nlib % 20)) { char b[48]; snprintf(b, sizeof b, "%d canciones", nlib); message("Música", "Leyendo la biblioteca...", b); }
+		}
 		if (!s->title[0]) { fs_to_utf8(e->d_name, s->title, sizeof s->title); char *dot = strrchr(s->title, '.'); if (dot && dot > s->title) *dot = 0; }
 		if (!s->album[0]) { if (folder) fs_to_utf8(folder, s->album, sizeof s->album); else snprintf(s->album, sizeof s->album, "Sin álbum"); }
 		if (!s->artist[0]) snprintf(s->artist, sizeof s->artist, "Artista desconocido");
@@ -222,7 +296,7 @@ static int load_library(void)
 	if (lib) return nlib;
 	lib = malloc(sizeof *lib * MAXT);
 	if (!lib) return 0;
-	if (!quiet) message("Música", "Leyendo la biblioteca...", "");
+	if (!quiet && !bg) message("Música", "Leyendo la biblioteca...", "");
 	nlib = 0; cache_hits = 0; cache_dirty = 0; gave_up = 0;
 	double t0 = now();
 	cache_load();
@@ -232,17 +306,75 @@ static int load_library(void)
 	free(old); old = 0; nold = 0;
 	qsort(lib, nlib, sizeof *lib, cmp_song);
 	if (cache_dirty) cache_save();
+	if (bg) return nlib;
 	lg("music: %d songs (%d from the cache) in %.2f s%s", nlib, cache_hits, now() - t0, quiet ? " (preload)" : "");
 	if (nlib >= MAXT) { static char m[64]; snprintf(m, sizeof m, "Biblioteca: se muestran %d canciones (máximo).", MAXT); eng_note(m); }
 	return nlib;
 }
 
-void music_preload(void)
+/* trusted: the warm process has just checked every file against the cache and saved it, and nothing in Music can
+ * change while the player runs (USB restarts it): the cache is taken as it is, without a stat per file (with
+ * thousands of songs that check alone took seconds) */
+void music_preload(int trusted)
 {
 	if (lib || access(LIBCACHE, R_OK)) return;	/* loaded already, or no cache yet (the first visit builds it) */
+	if (trusted) {
+		double t0 = now();
+		cache_load();
+		if (nold) {
+			lib = old; nlib = nold; old = 0; nold = 0;	/* exactly nlib entries: the library never grows once loaded */
+			qsort(lib, nlib, sizeof *lib, cmp_song);
+			lg("music: %d songs from the cache the start-up check left (%.2f s)", nlib, now() - t0);
+			return;
+		}
+	}
 	quiet = 1;
 	load_library();
 	quiet = 0;
+}
+
+/* the warm process (warm.c, a child at the lowest priority) reads the tags of new files into the library cache
+ * while the home screen shows: the first visit of Música then only checks the files. Returns the number of songs */
+int music_build_cache(void)
+{
+	bg = 1;
+	int n = load_library();
+	bg = 0;
+	return n;
+}
+
+/* the warm process again, after music_preload: every album's cover at every size the lists and the player use
+ * (cover_load makes them all from one decode; the first song of each artist + album stands for the album), then
+ * every other song's pointer to its picture, so the player shows it at once (reading a big FLAC picture again to
+ * learn it is the album's took 0.1-4 s on the first play of each song). Returns the albums; *decoded = songs that
+ * needed work, *inherited = songs of the player's library this process found (0: it read the cache itself) */
+int music_album_covers(int *decoded, int *inherited)
+{
+	static uint16_t px[PLAYER_ART * PLAYER_ART];
+	static const int sizes[] = { GRID_TH, BIG_THUMB, 28, PLAYER_ART };
+	int n = 0;
+	*decoded = 0;
+	*inherited = lib ? nlib : 0;
+	/* on the Walkman this child once found no library although the player had just loaded it (2026-10-21, cause
+	 * unknown): then the cache the start-up check wrote is read here */
+	if (!lib || !nlib) {
+		cache_load();
+		if (!nold) return 0;
+		lib = old; nlib = nold; old = 0; nold = 0;
+		qsort(lib, nlib, sizeof *lib, cmp_song);
+	}
+	for (int pass = 0; pass < 2; pass++)
+		for (int i = 0; i < nlib; i++) {
+			int first = !i || strcasecmp(lib[i].artist, lib[i - 1].artist) || strcasecmp(lib[i].album, lib[i - 1].album);
+			if (pass == 0 && !first) continue;	/* the albums first: the lists show them */
+			if (pass == 1 && first) continue;
+			if (pass == 0) n++;
+			int work = 0;
+			for (unsigned k = 0; k < sizeof sizes / sizeof *sizes; k++)	/* the first one missing makes them all */
+				if (!cover_known(lib[i].path, sizes[k])) { cover_load(lib[i].path, px, sizes[k]); work = 1; }
+			*decoded += work;
+		}
+	return n;
 }
 
 /* ---------- views ---------- */
@@ -380,6 +512,37 @@ static void album_view(struct list_view *v)
 	v->top = v->grid ? v->sel - v->sel % 3 : v->sel;
 }
 
+/* all albums: an album name can appear under several artists. The songs sorted by album name group them (one
+ * pass; comparing each song with every album found so far was songs x albums); the albums keep the library's
+ * order (by the first song of each) */
+static int by_album[MAXT];
+static int cmp_by_album(const void *a, const void *b)
+{
+	int x = *(const int *)a, y = *(const int *)b, r = strcasecmp(lib[x].album, lib[y].album);
+	return r ? r : x - y;
+}
+static int cmp_by_first(const void *a, const void *b) { return thumb_songidx[*(const int *)a] - thumb_songidx[*(const int *)b]; }
+static void all_albums(void)
+{
+	nnames = 0;
+	for (int i = 0; i < nlib; i++) by_album[i] = i;
+	qsort(by_album, nlib, sizeof *by_album, cmp_by_album);
+	for (int i = 0; i < nlib && nnames < MAXT; i++) {
+		int s = by_album[i];
+		if (i && !strcasecmp(lib[s].album, lib[by_album[i - 1]].album)) { name_count[nnames - 1]++; continue; }
+		thumb_songidx[nnames] = s; name_count[nnames] = 1; nnames++;	/* s = the album's first song (ties by index) */
+	}
+	/* back into the library's order; by_album is free again and holds the permutation */
+	for (int k = 0; k < nnames; k++) by_album[k] = k;
+	qsort(by_album, nnames, sizeof *by_album, cmp_by_first);
+	static int ts[MAXT], nc[MAXT];
+	for (int k = 0; k < nnames; k++) { ts[k] = thumb_songidx[by_album[k]]; nc[k] = name_count[by_album[k]]; }
+	for (int k = 0; k < nnames; k++) {
+		thumb_songidx[k] = ts[k]; name_count[k] = nc[k];
+		snprintf(names[k], sizeof names[0], "%s", lib[ts[k]].album);
+	}
+}
+
 /* the album list is built once per visit (names, first songs, thumbnails): coming back from an album is instant
  * and keeps the selection and the covers already decoded */
 static void albums_of(const char *artist)
@@ -387,15 +550,7 @@ static void albums_of(const char *artist)
 	char keep[64];
 	snprintf(keep, sizeof keep, "%s", artist ? artist : "");
 	if (artist) uniq(keep);
-	else {	/* all albums: an album name can appear under several artists, so a lookup (once per visit) */
-		nnames = 0;
-		for (int i = 0; i < nlib && nnames < MAXT; i++) {
-			int dup = -1;
-			for (int k = 0; k < nnames && dup < 0; k++) if (!strcasecmp(names[k], lib[i].album)) dup = k;
-			if (dup >= 0) name_count[dup]++;
-			else { thumb_songidx[nnames] = i; name_count[nnames] = 1; snprintf(names[nnames++], sizeof names[0], "%s", lib[i].album); }
-		}
-	}
+	else all_albums();
 	struct list_view v = { artist ? keep : "Álbumes", nnames, 0, 0, name_label, 0, 0, LI_NONE, "Vacío", 0, album_thumb, -1 };
 	album_view(&v);
 	for (;;) {

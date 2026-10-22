@@ -44,8 +44,9 @@ static void lg_flush(const char *statedir);
 static void lg(const char *statedir, const char *fmt, ...)
 {
 	char line[160];
+	struct timeval tv; gettimeofday(&tv, 0);
 	va_list a; va_start(a, fmt);
-	int n = snprintf(line, sizeof line, "[%ld] ", (long)time(0));
+	int n = snprintf(line, sizeof line, "[%ld.%03d] ", (long)tv.tv_sec, (int)(tv.tv_usec / 1000));
 	vsnprintf(line + n, sizeof line - n, fmt, a);
 	va_end(a);
 	if (strlen(pend) + strlen(line) + 2 < sizeof pend) { strcat(pend, line); strcat(pend, "\n"); }
@@ -91,7 +92,8 @@ int main(int argc, char **argv)
 	int down = 0, polled = 0;	/* polled: the press was seen in the key state only (no event) */
 	int seen_up = 0;	/* the key state has shown HOME up once: only then is a "down" in it believed (a wrong reading, or
 				 * HOME still held from leaving the player, must never reboot the Walkman) */
-	double t = 0;
+	double t = 0, upat = 0;	/* t: start of the hold; upat: when HOME last came up */
+	int reps = 0;
 	for (;;) {
 		struct ev e;
 		fd_set rs; FD_ZERO(&rs); FD_SET(fd, &rs);
@@ -110,8 +112,21 @@ int main(int argc, char **argv)
 			/* with HOLD on every key comes with 0x80 added: HOME held in a pocket must not reboot into the player,
 			 * so only the plain code counts; any other key or a HOLD move cancels */
 			if (e.type == 1) {
-				if (e.code == K_BACK) { down = KEY_PRESSED(e.value); polled = 0; t = now(); if (e.value != 2) lg(statedir, "HOME %s", down ? "down" : "up"); }
-				else { if (down || (e.code & 0x7f) == K_BACK) lg(statedir, "key %d value %d (cancels)", e.code, e.value); down = 0; }
+				/* after a USB session in the Sony UI (2026-10-19) HOME came as down+up pairs within the same second
+				 * while held: a release followed by a press within 400 ms is taken as a bounce and the hold goes on,
+				 * and an auto-repeat (value 2) keeps it as it is */
+				if (e.code == K_BACK && e.value == 2) { if (!reps++) lg(statedir, "HOME repeat (down %d)", down); }
+				else if (e.code == K_BACK && KEY_PRESSED(e.value)) {
+					double gap = upat ? now() - upat : 9;
+					if (!down && gap < 0.4 && t) lg(statedir, "HOME down again after %d ms up: bounce, the hold goes on", (int)(gap * 1000));
+					else { t = now(); lg(statedir, "HOME down, key state %d", home_state(fd)); }
+					down = 1; polled = 0; reps = 0;
+				}
+				else if (e.code == K_BACK) {
+					lg(statedir, "HOME up (value %d) after %d ms, key state %d", e.value, (int)((now() - t) * 1000), home_state(fd));
+					down = 0; polled = 0; upat = now();
+				}
+				else { if (down || (e.code & 0x7f) == K_BACK) lg(statedir, "key %d value %d (cancels)", e.code, e.value); down = 0; t = 0; }
 			}
 		} else if (r == 0) {	/* no event: the key state decides (HOME held while events don't come) */
 			lg_flush(statedir);

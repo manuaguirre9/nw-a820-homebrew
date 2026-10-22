@@ -5,9 +5,17 @@
  *   fs_to_utf8   directory entry -> text for the screen
  *   utf8_to_fs   a name we create (podcast episodes) -> Latin-1, with plain equivalents for the rest; the PC
  *                script podsync.py applies the same mapping, so both produce the same names
- *   fs_match     "does this directory entry stand for that UTF-8 name?" ('?' in the entry matches any character) */
+ *   fs_match     "does this directory entry stand for that UTF-8 name?" ('?' in the entry matches any character)
+ *   fs_path      dir + entry -> a path that opens: an entry with a '?' can't be opened by that name (the driver
+ *                looks up '?' literally), so it goes by its 8.3 short name */
 #include "hb.h"
+#include <fcntl.h>
+#include <stdio.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
 
 void fs_to_utf8(const char *in, char *out, size_t max)
 {
@@ -68,4 +76,30 @@ int fs_match(const char *fsname, const char *utf8name)
 		a++;
 	}
 	return !*a && !*b;
+}
+
+/* VFAT_IOCTL_READDIR_BOTH: one entry per call, [0] = the short name, [1] = the long one ("" when there is none);
+ * [0].d_reclen stays 0 at the end of the folder. The kernel's struct dirent, not glibc's (no d_type) */
+#ifndef _WIN32
+struct kdirent { long d_ino; long d_off; unsigned short d_reclen; char d_name[256]; };
+#define VFAT_READDIR_BOTH _IOR('r', 1, struct kdirent[2])
+#endif
+
+int fs_path(const char *dir, const char *name, char *out, size_t max)
+{
+	if (!strchr(name, '?')) { snprintf(out, max, "%s/%s", dir, name); return 1; }
+#ifdef _WIN32
+	return 0;
+#else
+	int fd = open(dir, O_RDONLY), found = 0;
+	if (fd < 0) return 0;
+	struct kdirent de[2];
+	for (;;) {
+		memset(de, 0, sizeof de);
+		if (ioctl(fd, VFAT_READDIR_BOTH, de) < 0 || !de[0].d_reclen) break;
+		if (de[1].d_name[0] && !strcmp(de[1].d_name, name)) { snprintf(out, max, "%s/%s", dir, de[0].d_name); found = 1; break; }
+	}
+	close(fd);
+	return found;
+#endif
 }

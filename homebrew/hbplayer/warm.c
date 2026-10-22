@@ -3,7 +3,10 @@
  * music folders and the cover cache are cold after a boot. A child process at the lowest priority reads all of that
  * once, right after the home screen shows: the page cache and the directory cache are shared, so the player then
  * finds it in RAM (a minor fault instead of a flash read). The child also moves the cover cache's flat files from
- * before 2026-10-14 into the per-byte subfolders cover.c uses now (they were orphaned: every cover decoded again).
+ * before 2026-10-14 into the per-byte subfolders cover.c uses now (they were orphaned: every cover decoded again),
+ * and reads the tags of new music files into the library cache. Once the player has loaded that cache, a second
+ * child makes every album's cover at every size (warm_covers_start): the first visit of Música and of the album
+ * lists then finds everything ready.
  * It never logs (the player's stdio buffers would be flushed twice): a summary goes to /tmp/hb_warm.txt. */
 #include "hb.h"
 #include <dirent.h>
@@ -20,8 +23,8 @@
 #define CACHE "/contents/HB/cache"
 #define THUMB_MAX (GRID_TH * GRID_TH * 2)	/* cache files up to the mosaic size are list thumbnails: read them */
 
-static pid_t warm_pid = -1;
-static double warm_t0;
+static pid_t warm_pid = -1, covers_pid = -1;
+static double warm_t0, covers_t0;
 static volatile unsigned sink;
 static long touched, nfiles, ndirs, moved;
 
@@ -106,11 +109,20 @@ static void cache_warm(void)
 	closedir(d);
 }
 
-static void child(void)
+/* a child that may run for minutes must not keep the player's devices open: the player's close of the watchdog,
+ * the sound device or the Bluetooth link would not release them while a copy of the descriptor lives here */
+static void child_setup(void)
 {
 	static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTERM, SIGHUP, SIGQUIT, SIGPIPE };
 	for (unsigned i = 0; i < sizeof sigs / sizeof *sigs; i++) signal(sigs[i], SIG_DFL);	/* not the player's crash handler */
 	setpriority(PRIO_PROCESS, 0, 19);
+	for (int fd = 3; fd < 256; fd++) close(fd);
+	cover_tick = 0; cover_cancel = 0;	/* the player's audio and keys are not ours */
+}
+
+static void child(void)
+{
+	child_setup();
 	double t0 = now();
 	gfx_warm_res(touch);	/* the home animation first: it is what the first key press shows */
 	scr_warm(touch);
@@ -122,13 +134,31 @@ static void child(void)
 	double t3 = now();
 	cache_warm();
 	double t4 = now();
+	int songs = music_build_cache();
+	double t5 = now();
 	FILE *f = fopen("/tmp/hb_warm.txt", "w");
 	if (f) {
-		fprintf(f, "res %ld KB %.1f s, code %ld KB %.1f s, music %ld entries %.1f s, covers %.1f s (%ld moved)",
-			touched >> 10, t1 - t0, exe >> 10, t2 - t1, nfiles, t3 - t2, t4 - t3, moved);
+		fprintf(f, "res %ld KB %.1f s, code %ld KB %.1f s, music %ld entries %.1f s, covers %.1f s (%ld moved), library %d songs %.1f s",
+			touched >> 10, t1 - t0, exe >> 10, t2 - t1, nfiles, t3 - t2, t4 - t3, moved, songs, t5 - t4);
 		fclose(f);
 	}
 	_exit(0);
+}
+
+/* after music_preload: the library is in this process, the child gets a copy of it */
+void warm_covers_start(void)
+{
+	if (covers_pid > 0) return;
+	covers_t0 = now();
+	covers_pid = fork();
+	if (covers_pid == 0) {
+		child_setup();
+		int decoded = 0, inherited = 0, albums = music_album_covers(&decoded, &inherited);
+		FILE *f = fopen("/tmp/hb_covers.txt", "w");
+		if (f) { fprintf(f, "%d albums, %d songs needed work (library: %d songs %s)", albums, decoded, inherited, inherited ? "inherited" : "read from the cache"); fclose(f); }
+		_exit(0);
+	}
+	if (covers_pid < 0) lg("warm: covers fork failed");
 }
 
 void warm_start(void)
@@ -140,21 +170,29 @@ void warm_start(void)
 	if (warm_pid < 0) lg("warm: fork failed");
 }
 
-/* from idle_tick: 1 when the child has just finished */
+/* from idle_tick: 1 when the first child has just finished, 2 when it also checked the library cache to the end */
 int warm_poll(void)
 {
+	if (covers_pid > 0 && waitpid(covers_pid, 0, WNOHANG) == covers_pid) {
+		covers_pid = -1;
+		char b[120] = "";
+		FILE *f = fopen("/tmp/hb_covers.txt", "r");
+		if (f) { if (!fgets(b, sizeof b, f)) b[0] = 0; fclose(f); unlink("/tmp/hb_covers.txt"); }
+		lg("warm: album covers done in %.1f s: %s", now() - covers_t0, b);
+	}
 	if (warm_pid <= 0 || waitpid(warm_pid, 0, WNOHANG) != warm_pid) return 0;
 	warm_pid = -1;
-	char b[200] = "";
+	char b[300] = "";
 	FILE *f = fopen("/tmp/hb_warm.txt", "r");
 	if (f) { if (!fgets(b, sizeof b, f)) b[0] = 0; fclose(f); unlink("/tmp/hb_warm.txt"); }
 	lg("warm: done in %.1f s: %s", now() - warm_t0, b);
-	return 1;
+	return strstr(b, ", library ") ? 2 : 1;
 }
 
 /* before the player lets /contents go (USB, Sony UI): the child keeps files open there */
 void warm_stop(void)
 {
+	if (covers_pid > 0) { kill(covers_pid, SIGKILL); waitpid(covers_pid, 0, 0); covers_pid = -1; }
 	if (warm_pid <= 0) return;
 	kill(warm_pid, SIGKILL);
 	waitpid(warm_pid, 0, 0);

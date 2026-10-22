@@ -1,4 +1,4 @@
-/* cover.c: album / book art. Looks for an embedded ID3v2 APIC (or v2.2 PIC) JPEG, else cover.jpg / folder.jpg
+/* cover.c: album / book art. Looks for an embedded ID3v2 APIC (or v2.2 PIC) or FLAC PICTURE JPEG, else cover.jpg / folder.jpg
  * next to the file (also when the embedded image can't be decoded). Decoded with TJpgDec (integer, baseline JPEG
  * only) using its 1/2..1/8 down-scaling so big podcast covers fit in RAM, then box-scaled to the requested square;
  * progressive JPEGs (TJpgDec can't) go through stb_image. */
@@ -175,6 +175,53 @@ out:
 	return img;
 }
 
+static unsigned be32(const unsigned char *p) { return (unsigned)p[0] << 24 | (unsigned)p[1] << 16 | (unsigned)p[2] << 8 | p[3]; }
+
+/* FLAC: the JPEG of a PICTURE metadata block (the front cover, type 3, when there are several); malloc'd, or 0 */
+static unsigned char *find_flac_pic(const char *path, size_t *len)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0) return 0;
+	unsigned char b[10], *blk = 0, *img = 0;
+	long off = 0;	/* an ID3v2 tag some taggers put in front of "fLaC" */
+	if (read(fd, b, 10) == 10 && !memcmp(b, "ID3", 3)) off = 10 + (long)syncsafe(b + 6) + (b[5] & 0x10 ? 10 : 0);
+	if (lseek(fd, off, SEEK_SET) < 0 || read(fd, b, 4) != 4 || memcmp(b, "fLaC", 4)) goto out;
+	off += 4;
+	for (int i = 0; i < 128; i++) {
+		if (lseek(fd, off, SEEK_SET) < 0 || read(fd, b, 4) != 4) break;
+		unsigned n = (unsigned)b[1] << 16 | (unsigned)b[2] << 8 | b[3];
+		if ((b[0] & 127) == 6 && n > 32 && n <= 4 * 1024 * 1024 && (blk = malloc(n))) {
+			for (unsigned got = 0; got < n; ) {	/* read in chunks, keeping the audio fed */
+				ssize_t r = read(fd, blk + got, n - got > 65536 ? 65536 : n - got);
+				if (r <= 0) goto out;
+				got += r;
+				if (cover_tick) cover_tick();
+				if (cancelled()) goto out;
+			}
+			/* type, mime, description, width, height, depth, colours, data; every length checked against the block */
+			const unsigned char *p = blk + 4, *e = blk + n;
+			unsigned type = be32(blk), l = be32(p);
+			p += 4;
+			if (l <= (size_t)(e - p) - 4) { p += l; l = be32(p); p += 4;	/* mime */
+				if (l <= (size_t)(e - p) && (size_t)(e - p) - l >= 20) { p += l + 16; l = be32(p); p += 4;	/* description, sizes */
+					if (l >= 4 && l <= (size_t)(e - p) && p[0] == 0xFF && p[1] == 0xD8 && (!img || type == 3)) {
+						free(img);
+						if ((img = malloc(l))) { memcpy(img, p, l); *len = l; }
+					}
+				}
+			}
+			free(blk); blk = 0;
+			if (img && type == 3) break;
+		}
+		if (b[0] & 128) break;	/* the last metadata block */
+		off += 4 + n;
+	}
+out:
+	free(blk);
+	close(fd);
+	return img;
+}
+
 static unsigned char *read_file(const char *path, size_t *len)
 {
 	FILE *f = fopen(path, "rb");
@@ -271,14 +318,49 @@ static int folder_cached(const char *path, int size, uint16_t *dst)
 
 static int cover_decode_src(const char *path, uint16_t *dst, int size, char *src, size_t srcmax);
 
+/* written to a temporary name and renamed: the background cover process (warm.c) and the player may both be
+ * writing or reading the same image */
 static void cache_write(const char *path, int size, const uint16_t *src)
 {
-	char fn[PATHLEN]; cache_name(fn, sizeof fn, path, size, "rgb");
+	char fn[PATHLEN], tmp[PATHLEN + 16]; cache_name(fn, sizeof fn, path, size, "rgb");
 	cache_mkdir(fn);
-	FILE *f = fopen(fn, "wb");
+	snprintf(tmp, sizeof tmp, "%s.%d", fn, (int)getpid());
+	FILE *f = fopen(tmp, "wb");
 	if (!f) return;
-	fwrite(src, 2, (size_t)size * size, f);
-	fclose(f);
+	int ok = fwrite(src, 2, (size_t)size * size, f) == (size_t)size * size;
+	if (fclose(f) || !ok || rename(tmp, fn)) unlink(tmp);
+}
+static int cache_has(const char *path, int size)
+{
+	char fn[PATHLEN]; cache_name(fn, sizeof fn, path, size, "rgb");
+	return access(fn, F_OK) == 0;
+}
+
+/* what a decode found, remembered for one size: the image (under the picture's key, the folder image's path or the
+ * track's own path) and the track's pointer to it, or the "no cover" marker */
+static void remember(const char *path, int size, const uint16_t *img, int ok, const char *src)
+{
+	if (!ok) marker_set(path, size, "no3");
+	else if (!strncmp(src, "apic:", 5)) { if (!cache_has(src, size)) cache_write(src, size, img); ref_set(path, size, src); }	/* embedded: one image per picture */
+	else if (src[0]) { if (!cache_has(src, size)) cache_write(src, size, img); marker_set(path, size, "dir"); }	/* one image per folder */
+	else cache_write(path, size, img);
+}
+
+/* box filter from one square size down to a smaller one */
+static void scale_down(const uint16_t *s, int sn, uint16_t *d, int dn)
+{
+	for (int y = 0; y < dn; y++) {
+		int y0 = y * sn / dn, y1 = (y + 1) * sn / dn;
+		if (y1 <= y0) y1 = y0 + 1;
+		for (int x = 0; x < dn; x++) {
+			int x0 = x * sn / dn, x1 = (x + 1) * sn / dn;
+			if (x1 <= x0) x1 = x0 + 1;
+			int r = 0, g = 0, b = 0, c = 0;
+			for (int yy = y0; yy < y1; yy++)
+				for (int xx = x0; xx < x1; xx++) { uint16_t v = s[yy * sn + xx]; r += v >> 11; g += (v >> 5) & 63; b += v & 31; c++; }
+			d[y * dn + x] = (uint16_t)((r / c) << 11 | (g / c) << 5 | (b / c));
+		}
+	}
 }
 
 /* cover of `path` at size x size (112 = player, 28 = list thumbnail): cache, then the tag / folder image. Results
@@ -294,16 +376,34 @@ int cover_load(const char *path, uint16_t *dst, int size)
 		}
 		return 1;
 	}
-	if (marker_has(path, size, "no2")) return 0;	/* "no2": older "no" markers included progressive JPEGs, now readable */
+	if (marker_has(path, size, "no3")) return 0;	/* "no3": older markers included progressive JPEGs ("no") and FLAC pictures ("no2"), now readable */
 	if (marker_has(path, size, "dir") && folder_cached(path, size, dst)) return 1;
 	if (ref_cached(path, size, dst)) return 1;
+	/* decoded once at the player's size, and every smaller size the lists use is made from that image: an album
+	 * used to be decoded again for the list, the mosaic and the player (1.2 s each for a big FLAC cover). Music:
+	 * album list, mosaic, big rows; podcasts and books: the show screen, folder rows, episode rows, downloads */
+	static const int music_sizes[] = { PLAYER_ART, GRID_TH, BIG_THUMB, 28, 0 };
+	static const int other_sizes[] = { PLAYER_ART, POD_ART, BIG_THUMB, EP_THUMB, 40, 28, 0 };
+	const int *sizes = !strncmp(path, "/contents/Music/", 16) ? music_sizes : other_sizes;
+	static uint16_t small[PLAYER_ART * PLAYER_ART];
 	char src[PATHLEN + 16];
-	int ok = cover_decode_src(path, dst, size, src, sizeof src);
-	if (aborted) return 0;	/* a key came: nothing is remembered, the caller tries again later */
-	if (!ok) marker_set(path, size, "no2");
-	else if (!strncmp(src, "apic:", 5)) ref_set(path, size, src);	/* embedded: one image per picture */
-	else if (src[0]) { cache_write(src, size, dst); marker_set(path, size, "dir"); }	/* one image per folder */
-	else cache_write(path, size, dst);
+	int big = size < PLAYER_ART ? PLAYER_ART : size;
+	uint16_t *full = big == size ? dst : malloc((size_t)big * big * 2);
+	if (!full) { full = dst; big = size; }
+	int ok = cover_decode_src(path, full, big, src, sizeof src);
+	if (aborted) { if (full != dst) free(full); return 0; }	/* a key came: nothing is remembered, the caller tries again later */
+	remember(path, big, full, ok, src);
+	int done_req = big == size;
+	for (int k = 0; sizes[k]; k++) {
+		int sz = sizes[k];
+		if (sz >= big) continue;
+		uint16_t *out = sz == size ? dst : small;
+		if (ok) scale_down(full, big, out, sz);
+		remember(path, sz, out, ok, src);
+		if (sz == size) done_req = 1;
+	}
+	if (!done_req) { if (ok) scale_down(full, big, dst, size); remember(path, size, dst, ok, src); }
+	if (full != dst) free(full);
 	return ok;
 }
 
@@ -315,6 +415,7 @@ static int cover_decode_src(const char *path, uint16_t *dst, int size, char *src
 	size_t n = 0;
 	src[0] = 0;
 	unsigned char *jpg = find_apic(path, &n);
+	if (!jpg && !aborted) jpg = find_flac_pic(path, &n);
 	if (aborted) { free(jpg); return 0; }
 	if (jpg) {	/* cached under the picture's own key: the album's other tracks decoded it already? */
 		unsigned long h = 2166136261u;
@@ -325,7 +426,6 @@ static int cover_decode_src(const char *path, uint16_t *dst, int size, char *src
 			free(jpg);
 			if (aborted) return 0;
 			snprintf(src, srcmax, "%s", key);
-			if (!hit) cache_write(key, size, dst);
 			return 1;
 		}
 		free(jpg); jpg = 0;	/* embedded image unreadable: try the folder image */
@@ -359,6 +459,13 @@ int cover_decode_file(const char *jpg_path, uint16_t *dst, int size)
 	int ok = decode(jpg, n, dst, size);
 	free(jpg);
 	return ok;
+}
+
+/* anything remembered for this file at this size (an image, a pointer to one, or "no cover")? Only looks for the
+ * files, without reading them: the background pass asks this for every song at every start */
+int cover_known(const char *path, int size)
+{
+	return cache_has(path, size) || marker_has(path, size, "ref") || marker_has(path, size, "dir") || marker_has(path, size, "no3");
 }
 
 /* only what the cache already has: no tag reading or decoding (instant) */

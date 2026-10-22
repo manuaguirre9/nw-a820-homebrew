@@ -50,11 +50,14 @@ static int want_direct(void)
 }
 int eng_direct(void) { return have_file && dec_direct(); }
 
+/* pos.txt is written a few seconds later (settings_save), not on the spot: rewriting and fsyncing it on the
+ * internal flash at every pause, skip and pick held up the key. Power off, suspend, USB and leaving the player
+ * write it at once (pos_save) */
 static void save_pos(void)
 {
 	if (!have_file) return;	/* books, podcasts and music all resume where they were */
 	pos_set(q[order[qi]].path, dec_pos_bytes(), (int)dec_pos_sec());
-	pos_save();
+	settings_save();
 }
 
 static void close_file(void)
@@ -65,6 +68,7 @@ static void close_file(void)
 }
 
 int eng_resume_music;	/* set by resume_last(): the next song opened continues at its saved position */
+static double of_dec, of_extra;	/* the last open_file: decoder open, then the rest (lyrics, chapters, position) */
 
 static int open_file(int fade)
 {
@@ -72,7 +76,10 @@ static int open_file(int fade)
 	const char *path = q[order[qi]].path;
 	hires_failed = 0;
 	dec_set_direct(want_direct());
-	if (dec_open(path)) {
+	double t0 = now();
+	int bad = dec_open(path);
+	of_dec = now() - t0; of_extra = 0;
+	if (bad) {
 		lg("eng: open failed %s", path);
 		if (dec_error()) eng_note(dec_error());	/* e.g. "Archivo protegido (DRM)"; eng_frame skips the track */
 		return -1;
@@ -97,6 +104,7 @@ static int open_file(int fade)
 		}
 	}
 	if (mode == ENG_BOOK) set_lastfile(path);
+	of_extra = now() - t0 - of_dec;
 	lastsave = time(0);
 	changed = 1;
 	if (dec_direct()) aout_set_volume();	/* the codec volume: no aout_start in direct mode (needs audio.c to apply it without an open device) */
@@ -134,7 +142,12 @@ void eng_play(const struct track *list, int n, int idx, int m, const char *ctx) 
 /* shuffle: -1 = as configured (eng_shuffle), 0/1 = force for this queue */
 void eng_play2(const struct track *list, int n, int idx, int m, const char *ctx, int shuffle)
 {
-	eng_stop();
+	double t0 = now();
+	/* the old queue ends like a skip, not like eng_stop: its queued tail is dropped (closing the device plays it out
+	 * first, ~0.7 s of waiting) and the DSP helper keeps the device in direct mode (a direct song next reuses it;
+	 * dec_open releases it, only when the new file needs the normal path; the release alone was ~0.3 s) */
+	if (active) { save_pos(); dspfx_reset(); aout_stop_now(); close_file(); active = 0; paused = 0; changed = 1; }
+	double t1 = now();
 	bt_take_dropped();	/* a drop that happened while idle must not pause the new playback */
 	if (n > MAXQ) n = MAXQ;
 	size_t need = 0;
@@ -159,7 +172,12 @@ void eng_play2(const struct track *list, int n, int idx, int m, const char *ctx,
 		qi = 0;
 	} else qi = idx;
 	active = 1; paused = 0; open_fails = 0;
-	if (open_file(1) && nq <= 1) { active = 0; return; }	/* more tracks: eng_frame skips the bad one */
+	double t2 = now();
+	int bad = open_file(1);
+	double t3 = now();
+	if (t3 - t0 > 0.1) lg("eng: start took %d ms: stop %d, queue %d, decoder %d, lyrics/chapters/position %d", (int)((t3 - t0) * 1000),
+		(int)((t1 - t0) * 1000), (int)((t2 - t1) * 1000), (int)(of_dec * 1000), (int)(of_extra * 1000));
+	if (bad && nq <= 1) { active = 0; return; }	/* more tracks: eng_frame skips the bad one */
 }
 
 void eng_stop(void)
@@ -232,8 +250,8 @@ static int advance(int dir, int user)
 	if (mode == ENG_MUSIC && !user && eng_repeat == 2) return open_file(0) == 0;
 	if (qi + 1 < nq) qi++;
 	else if (mode == ENG_MUSIC && (eng_repeat == 1 || user)) qi = 0;
-	else { pos_save(); close_file(); dsp_direct_release(); aout_stop(); active = 0; changed = 1; return 0; }
-	pos_save();
+	else { settings_save(); close_file(); dsp_direct_release(); aout_stop(); active = 0; changed = 1; return 0; }
+	settings_save();
 	return open_file(user) == 0;
 }
 void eng_next(void) { if (active) advance(1, 1); }
@@ -453,6 +471,9 @@ static int eng_frame(void)
 void eng_step(void)
 {
 	if (!active || paused) { eng_frame(); return; }
+	/* after a direct song the DSP helper may still be letting the device go: nothing is decoded until it has (the
+	 * screen and the keys go on meanwhile; the release used to block right here) */
+	if (have_file && !dec_direct() && !dsp_direct_release_poll()) return;
 	int sp = aout_space();
 	if (sp < 0) { eng_frame(); return; }
 	static double started;

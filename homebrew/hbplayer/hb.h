@@ -111,6 +111,7 @@ void set_cpu(int mhz);
 void fs_to_utf8(const char *in, char *out, size_t max);
 void utf8_to_fs(const char *in, char *out, size_t max);
 int fs_match(const char *fsname, const char *utf8name);
+int fs_path(const char *dir, const char *name, char *out, size_t max);
 void remote_mode(void);		/* the Walkman as a Bluetooth remote / keyboard for a phone or PC (homebrew/hid) */
 /* podsync.c: podcasts over the phone's Bluetooth tethering: subscriptions, the shared link, background downloads */
 struct rss_item;
@@ -170,6 +171,7 @@ void bt_auto_start(void);		/* remembered device: bring the stack up in the backg
 /* cover.c */
 int cover_load(const char *path, uint16_t *dst, int size);	/* cached on /contents/HB/cache */
 int cover_decode_file(const char *jpg, uint16_t *dst, int size);	/* a JPEG file, not cached (downloaded thumbnails) */
+int cover_known(const char *path, int size);	/* something is cached for it (no read) */
 int cover_cached(const char *path, uint16_t *dst, int size);	/* cache only, instant */
 extern void (*cover_tick)(void);	/* called while decoding, to keep the audio fed */
 extern int (*cover_cancel)(void);	/* optional: returns 1 to give up (a key came); then cover_aborted() is 1 */
@@ -244,6 +246,7 @@ int dsp_direct_open(const char *path, long offset, const char *codec);	/* the DS
 int dsp_direct_poll(unsigned *ms, unsigned long *units);	/* 1 playing, 0 ended, -1 failed */
 void dsp_direct_pause(int p);
 void dsp_direct_release(void);		/* free /dev/sound/dsp (the helper leaves direct mode); before aout_start */
+int dsp_direct_release_poll(void);	/* the same without waiting: 1 = device free, 0 = ask again later */
 int dsp_read(short *stereo, int maxframes);
 int dsp_protected(void);		/* the last dsp_read error was a protected / unsupported file */
 void dsp_stop(void);
@@ -305,10 +308,13 @@ void settings_menu(void);
 
 /* music.c / focus.c */
 void music_menu(void);
-void music_preload(void);	/* the library from its cache, silently; gives up at the first new / changed file */
+void music_preload(int trusted);	/* the library from its cache, silently; gives up at the first new / changed file */
+int music_build_cache(void);	/* warm process: reads new files' tags into the library cache (no UI, no log) */
+int music_album_covers(int *decoded, int *inherited);	/* warm process: every album's cover at every size; returns albums */
 /* warm.c: start-up warm-up of resources, code, music folders and cover thumbnails in a low-priority child */
 void warm_start(void);
 int warm_poll(void);	/* 1 when it has just finished */
+void warm_covers_start(void);	/* after music_preload: every album cover at every size, in a low-priority child */
 void warm_stop(void);	/* before /contents is let go */
 void focus_menu(void);
 #endif

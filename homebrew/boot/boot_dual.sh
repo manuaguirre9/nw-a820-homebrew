@@ -90,6 +90,18 @@ sync
 # the Sony UI runs at whatever clock it finds (it never changes it): 248 MHz, unless the player's setting "Walkman de
 # Sony: ahorro" (experimental) left /contents/HB/sony124
 [ -f /contents/HB/sony124 ] && echo -n M124 > /proc/pm
-# Sony UI: the HOME-held watcher (16 KB, copied to RAM: USB mass storage can take /contents away from the Sony UI)
-[ -f $B/hbwatch ] && cp $B/hbwatch /tmp/hbwatch && chmod 755 /tmp/hbwatch && ( cd / && exec /tmp/hbwatch /var/hb < /dev/null > /dev/null 2>&1 ) &
+# Sony UI: the HOME-held watcher (16 KB, copied to RAM: USB mass storage can take /contents away from the Sony UI).
+# It never ends by itself (HOME held reboots the Walkman), so an exit is logged and it is started again: on 2026-10-20
+# a Sony session left no hbwatch log at all and HOME did nothing
+echo "sony UI uptime=$(cat /proc/uptime)" >> $O/boot_events.txt
+if [ -f $B/hbwatch ] && cp $B/hbwatch /tmp/hbwatch && chmod 755 /tmp/hbwatch; then
+	( cd / && N=0; while [ $N -lt 20 ]; do
+		/tmp/hbwatch /var/hb < /dev/null > /dev/null 2>&1
+		RC=$?
+		[ -w /var/hb ] && echo "[$(date +%s)] hbwatch exited rc=$RC, starting it again" >> /var/hb/hbwatch.log
+		N=$(expr $N + 1); sleep 2
+	done ) &
+else
+	echo "hbwatch could not be started" >> $O/boot_events.txt
+fi
 exit 0
