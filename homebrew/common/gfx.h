@@ -34,6 +34,7 @@ void gfx_blit(struct img im, int x, int y);		/* opaque */
 void gfx_blit_key(struct img im, int x, int y);	/* black (0x0000) pixels are transparent */
 struct img gfx_tex(int group, int item);	/* Sony texture; w = 0 if unavailable */
 struct img gfx_anim(int item);
+int gfx_anim_intl(void);	/* international pack: alternate indices and reversed frames */
 int gfx_tex_n(int group);		/* items in a texture group */
 void gfx_warm_res(void (*touch)(const void *p, long n));	/* home animation, font, texture index: touch(p, n) each */		/* frame of Sony's home-menu animation (ICX1115_home_anim.dpk) */
 struct img gfx_scaled(struct img src, int w, int h, uint16_t *buf);	/* nearest-neighbour resize into buf */

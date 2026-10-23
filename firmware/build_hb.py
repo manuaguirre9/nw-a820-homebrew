@@ -6,10 +6,13 @@
 #   /usr/local/bin/gemini-ICX1115: byte patches listed in BIN_PATCHES (e.g. silencing the "Simple Mode" popup);
 #                       each entry is verified against the original bytes before it is applied.
 # Revert = official jp/NW_WM_FW.UPG (md5 fa3c6ae0152eb26c9ce94570735f0318) via fwtrig.py.
-import tarfile, io, gzip, hashlib
+# --variant intl: same hook on the official NWZ-A82x 1.02 (intl key, gemini-ICX1113, no BIN_PATCHES). Untested on a device.
+import tarfile, io, gzip, hashlib, sys
 from upgpack import pack, unpack
 JPKEY, JPSIG = b'5ef17493', b'07fa0b6e'
+INTLKEY, INTLSIG = b'4abf02d3', b'97ecc5b9'
 SRC, BASE, OUT, SUBREV = 'jp_file3.dec', 'jp/NW_WM_FW.UPG', 'NW_WM_FW_hb.UPG', '41  '
+INTL_BASE, INTL_OUT = 'intl/NW_WM_FW.UPG', 'NW_WM_FW_hb_intl.UPG'
 
 # file in tar -> list of (file offset, original bytes, new bytes)
 BIN_PATCHES = {
@@ -42,14 +45,16 @@ fi
 
 patches = {'./etc/init.d/gemini': [('checkdata\numount /contents > /dev/null 2>&1\n', HOOK)]}
 
-def build_hook(base):
-    """the hook firmware (bytes) from the official JP 1.02 NW_WM_FW.UPG (bytes): its rootfs (file 3, gzip'd tar)
-    with the patches above, the other three files as they are"""
-    sig, files = unpack(base, JPKEY)
-    return _build(gzip.decompress(files[3]), files)
+def build_hook(base, variant='jp'):
+    """the hook firmware (bytes) from the official 1.02 NW_WM_FW.UPG (bytes) of that variant: its rootfs
+    (file 3, gzip'd tar) with the patches above, the other three files as they are"""
+    key, want_sig, bin_patches = (JPKEY, JPSIG, BIN_PATCHES) if variant == 'jp' else (INTLKEY, INTLSIG, {})
+    sig, files = unpack(base, key)
+    assert sig == want_sig, (variant, sig)
+    return _build(gzip.decompress(files[3]), files, key, sig, bin_patches)
 
 
-def _build(tar_bytes, files):
+def _build(tar_bytes, files, key=JPKEY, sig=JPSIG, bin_patches=BIN_PATCHES):
     tin = tarfile.open(fileobj=io.BytesIO(tar_bytes)); out = io.BytesIO()
     tout = tarfile.open(fileobj=out, mode='w', format=tin.format)
     done = []
@@ -59,9 +64,9 @@ def _build(tar_bytes, files):
             for a, b in patches[m.name]:
                 assert s.count(a) == 1, (m.name, a[:40], s.count(a)); s = s.replace(a, b)
             data = s.encode('latin1'); m.size = len(data); tout.addfile(m, io.BytesIO(data)); done.append(m.name)
-        elif m.isfile() and m.name in BIN_PATCHES:
+        elif m.isfile() and m.name in bin_patches:
             data = bytearray(tin.extractfile(m).read())
-            for off, orig, new in BIN_PATCHES[m.name]:
+            for off, orig, new in bin_patches[m.name]:
                 assert bytes(data[off:off + len(orig)]) == orig, (m.name, hex(off), bytes(data[off:off + len(orig)]).hex())
                 data[off:off + len(new)] = new
             m.size = len(data); tout.addfile(m, io.BytesIO(bytes(data))); done.append(m.name)
@@ -75,15 +80,17 @@ def _build(tar_bytes, files):
         else:
             tout.addfile(m)
     tout.close()
-    assert sorted(done) == sorted(list(patches) + list(BIN_PATCHES) + ['./etc/firmversion']), done
+    assert sorted(done) == sorted(list(patches) + list(bin_patches) + ['./etc/firmversion']), done
     gz = gzip.compress(out.getvalue(), compresslevel=9, mtime=0)
-    new = pack([files[0], files[1], files[2], gz], JPKEY, JPSIG)
-    s2, f2 = unpack(new, JPKEY)
-    assert s2 == JPSIG and f2[:3] == files[:3] and f2[3] == gz
+    new = pack([files[0], files[1], files[2], gz], key, sig)
+    s2, f2 = unpack(new, key)
+    assert s2 == sig and f2[:3] == files[:3] and f2[3] == gz
     return new
 
 
-if __name__ == '__main__':	# python build_hb.py: jp/NW_WM_FW.UPG -> NW_WM_FW_hb.UPG
-    new = build_hook(open(BASE, 'rb').read())
-    open(OUT, 'wb').write(new)
-    print('built', OUT, len(new), 'bytes md5', hashlib.md5(new).hexdigest())
+if __name__ == '__main__':	# python build_hb.py [--variant intl]: jp/NW_WM_FW.UPG -> NW_WM_FW_hb.UPG (intl/ -> _hb_intl)
+    variant = 'intl' if '--variant' in sys.argv and sys.argv[sys.argv.index('--variant') + 1] == 'intl' else 'jp'
+    base, out = (BASE, OUT) if variant == 'jp' else (INTL_BASE, INTL_OUT)
+    new = build_hook(open(base, 'rb').read(), variant)
+    open(out, 'wb').write(new)
+    print('built', out, len(new), 'bytes md5', hashlib.md5(new).hexdigest())

@@ -154,11 +154,16 @@ Nothing it does touches your positions or settings.
 
 The international NWZ-A826/A828/A829 use the same hardware and almost the same firmware (same kernel, near-identical
 root filesystem; the differences are the UI binary, USB mode (MTP) and the key the update package is encrypted with).
-The hook should apply unchanged, but:
+**Status: the homebrew runs on a real NWZ-A829** (installed by hand by [@GustavoAco](https://github.com/GustavoAco),
+see [#2](https://github.com/manuaguirre9/nw-a820-homebrew/issues/2)), but the installer does not support these models
+yet, so please wait for a release that says so. What we know:
 
-- the build script still needs an international variant (different updater and key, no Simple Mode patch);
-- `fwtrig.py` needs the Walkman to show up as a USB drive, which may not happen in MTP mode;
-- nobody has tried it on a real NWZ unit yet.
+- the Walkman only shows up as an MTP media device (no drive letter), so `fwtrig.py` and the drive copy can't be used;
+  the `HB` folder can be copied over MTP;
+- Sony's international updater doesn't detect the Walkman on Windows 10/11 (it looks for the `WUDFRd` driver, the
+  device uses `WUDFWpd`); it works on Windows XP, or with a small patch to a copy of `FWUpdaterCom.dll`;
+- `python build_hb.py --variant intl` builds the hook from the official NWZ-A820 1.02 (international key, no Simple
+  Mode patch); this exact build has not been flashed on a device yet.
 
 If you have one, or another Walkman you'd like to see supported, and want to help: open the installer with the Walkman
 connected and press **Save report** (it only reads information and changes nothing). It saves `Walkman-report.txt`
@@ -175,6 +180,13 @@ drag the file into it.
 | `research/` | DSP and UI reverse-engineering notes and tools |
 | `tools/podsync/` | Podcast sync from the PC |
 | `docs/` | Firmware notes (Spanish) and the project log |
+
+## Credits
+
+- [@GustavoAco](https://github.com/GustavoAco): first to run the homebrew on an international NWZ-A829, found the
+  Sony updater's driver check and its patch, the international home icons and the wallpaper setting.
+- [@keeper46](https://github.com/keeper46): device reports and testing on an NWZ-A829 (US/Canada).
+- Everyone who sent a report from the installer.
 
 ## License
 

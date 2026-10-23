@@ -235,19 +235,27 @@ static void free_space(const char *path, char *out, size_t max)
 	for (char *c = out; *c; c++) if (*c == '.') *c = ',';
 }
 
+/* every line fits the 240 px screen: the Sony font is wide (about 9 characters per 100 px) */
 static void about_screen(void)
 {
-	char ver[64], c[24], v[24], sp[80];
-	snprintf(ver, sizeof ver, "Versión %s", HB_VERSION);
+	char ver[64], date[24] = "", c[24], v[24], fr[48], st[48];
+	snprintf(ver, sizeof ver, "%s", HB_VERSION);	/* "1.1 (2026-10-22)": version and build date on two lines */
+	char *p = strstr(ver, " (");
+	if (p) { snprintf(date, sizeof date, "%s", p + 2); *p = 0; if ((p = strchr(date, ')'))) *p = 0; }
+	char vl[80]; snprintf(vl, sizeof vl, "Versión %s", ver);
 	free_space("/contents", c, sizeof c); free_space(statedir, v, sizeof v);
-	snprintf(sp, sizeof sp, "Libre: %s · ajustes %s", c, v);
-	scr_message("Acerca de", "Walkman NW-A829 homebrew", "");
-	gfx_text_center(W / 2, 140, ver, C_WHITE, 1);
-	gfx_text_center(W / 2, 162, sp, C_GREY, 1);
-	gfx_text_center(W / 2, 192, "Licencia: GPL-2.0", C_GREY, 1);
-	gfx_text_center(W / 2, 214, "libmad · FAAD2 · gnuboy · lwIP", C_DARK, 1);
-	gfx_text_center(W / 2, 232, "Mbed TLS · Sonic · TJpgDec", C_DARK, 1);
-	gfx_text_center(W / 2, 262, "HOME 3 s: volver a Sony", C_ORANGE, 1);
+	snprintf(fr, sizeof fr, "Libre: %s", c); snprintf(st, sizeof st, "Ajustes: %s", v);
+	scr_screen("Acerca de");
+	gfx_text_center(W / 2, 50, gfx_anim_intl() ? "NWZ-A820 homebrew" : "NW-A820 homebrew", C_WHITE, 1);
+	gfx_text_center(W / 2, 80, vl, C_WHITE, 1);
+	if (*date) gfx_text_center(W / 2, 102, date, C_GREY, 1);
+	gfx_text_center(W / 2, 130, fr, C_GREY, 1);
+	gfx_text_center(W / 2, 152, st, C_GREY, 1);
+	gfx_text_center(W / 2, 180, "Licencia: GPL-2.0", C_GREY, 1);
+	gfx_text_center(W / 2, 202, "libmad · FAAD2 · lwIP", C_DARK, 1);
+	gfx_text_center(W / 2, 222, "gnuboy · Sonic", C_DARK, 1);
+	gfx_text_center(W / 2, 242, "Mbed TLS · TJpgDec", C_DARK, 1);
+	gfx_text_center(W / 2, 266, "HOME 3 s: ir a Sony", C_ORANGE, 1);
 	gfx_flip();
 	while (getkey(500) != K_BACK) idle_tick(0);
 }
@@ -280,16 +288,18 @@ static void reset_menu(void)
 /* Ajustes > Pantalla */
 static void screen_menu(void)
 {
-	struct list_view v = { "Pantalla", 3, 0, 0, it_label, it_value, 0, LI_NONE, 0, 0 };
+	struct list_view v = { "Pantalla", 4, 0, 0, it_label, it_value, 0, LI_NONE, 0, 0 };
 	for (;;) {
 		snprintf(items[0], 48, "Brillo"); snprintf(values[0], 24, "%d%%", ui_brightness);
 		snprintf(items[1], 48, "Apagar pantalla"); snprintf(values[1], 24, "%d s", ui_dim_secs);
 		snprintf(items[2], 48, "Filas grandes con portada"); snprintf(values[2], 24, "%s", ui_big_rows ? "sí" : "no");
+		snprintf(items[3], 48, "Fondo"); snprintf(values[3], 24, "%s", wall_names[ui_wall]);
 		int s = list_run(&v);
 		if (s < 0) return;
 		if (s == 0) { ui_brightness = ui_brightness >= 100 ? 20 : ui_brightness + 20; gfx_backlight(ui_brightness); }
 		else if (s == 1) ui_dim_secs = ui_dim_secs >= 120 ? 15 : ui_dim_secs * 2;
 		else if (s == 2) ui_big_rows = !ui_big_rows;	/* álbumes, podcasts y audiolibros: from the next time the list opens */
+		else if (s == 3) { ui_wall = (ui_wall + 1) % WALL_COUNT; scr_wall_changed(); }
 		settings_save();
 	}
 }

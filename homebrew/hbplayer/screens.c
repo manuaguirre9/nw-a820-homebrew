@@ -40,7 +40,15 @@ struct ui_status ui_st = { -1, 0, 0, 0, 0, 0, 0 };
 
 const char *const home_labels[HOME_SLOTS] = { "Modo foco", "Audiolibros", "Podcasts", "Reproduciendo", "Música", "Juegos", "Bluetooth", "Apagar", "Ajustes" };	/* Música in the centre, like Sony */
 /* icon per slot: >= 100 -> Sony's own animation (first frame index - 100), else our ICON_*, -1 empty */
-static const int home_src[HOME_SLOTS] = { ICON_LOTUS, ICON_BOOK, 100 + 45, 100 + 27, 100 + 54, ICON_GAMEPAD, 100 + 72, ICON_POWER, 100 + 9 };
+static int home_src[HOME_SLOTS] = { ICON_LOTUS, ICON_BOOK, 100 + 45, 100 + 27, 100 + 54, ICON_GAMEPAD, 100 + 72, ICON_POWER, 100 + 9 };
+static const int home_src_intl[HOME_SLOTS] = { ICON_LOTUS, ICON_BOOK, ICON_MIC, ICON_PLAY, 100 + 55, ICON_GAMEPAD, 100 + 37, ICON_POWER, 100 + 18 };
+static void home_src_init(void)
+{
+	static int done;
+	if (done || !gfx_anim_intl()) return;
+	done = 1;
+	memcpy(home_src, home_src_intl, sizeof home_src);
+}
 static const int home_fallback[HOME_SLOTS] = { ICON_LOTUS, ICON_BOOK, ICON_MIC, ICON_PLAY, ICON_PLAY, ICON_GAMEPAD, ICON_BT, ICON_POWER, ICON_GEAR };
 
 /* ---------- colours and blending ---------- */
@@ -56,25 +64,61 @@ static uint16_t mix(int r0, int g0, int b0, int r1, int g1, int b1, int t, int n
 /* background colour of row y, taken from Sony's own assets: pure black (menus, and the home frames are composited on
  * black), and on home the deep blue band of Sony's backgrounds (the "POWER OFF"/splash textures: black down to ~y 213,
  * then pure blue with a touch of red, ~(8,0,41) at y 244 and ~(16,0,100) near the status bar). */
+int ui_wall;
+const char *const wall_names[WALL_COUNT] = { "Sony (negro)", "Azul noche", "Verde", "Violeta", "Vino", "Gris" };
+static const unsigned char wall_rgb[WALL_COUNT][3] = { { 0, 0, 0 }, { 0, 20, 90 }, { 0, 70, 30 }, { 70, 0, 90 }, { 90, 0, 20 }, { 55, 55, 60 } };
+static int bg_made_for = -1;
+/* the wallpaper gradients are dark and long: in RGB565 plain rows make bands ~24 px tall, tinted green/purple where
+ * the 6-bit green steps between the 5-bit red/blue ones. A 4x4 ordered dither hides them: per row, one colour per x & 3. */
+static uint16_t wall_dither[H][4];
+static const unsigned char bayer4[16] = { 0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5 };
+
+static int dither_ch(int v16, int bits, int k)	/* v16: 8-bit value in 1/16ths; k: 0..15 threshold */
+{
+	int sh = 8 - bits, q = (v16 + (k << sh)) >> (sh + 4), max = (1 << bits) - 1;
+	return q > max ? max : q;
+}
+
 static uint16_t bg_row(int y, int home)
 {
 	static uint16_t t[2][H];
-	static int made;
-	if (!made) {
+	if (bg_made_for != ui_wall) {
 		for (int j = 0; j < H; j++) {
 			int b = j > 213 ? (j - 213) * 145 / 100 : 0;
 			if (b > 150) b = 150;
+			if (ui_wall > 0 && ui_wall < WALL_COUNT) {
+				const unsigned char *c = wall_rgb[ui_wall];
+				t[0][j] = t[1][j] = RGB(c[0] * j / H, c[1] * j / H, c[2] * j / H);
+				for (int i = 0; i < 4; i++) {
+					int k = bayer4[(j & 3) * 4 + i];
+					wall_dither[j][i] = dither_ch(c[0] * j * 16 / H, 5, k) << 11 | dither_ch(c[1] * j * 16 / H, 6, k) << 5 | dither_ch(c[2] * j * 16 / H, 5, k);
+				}
+				continue;
+			}
 			t[0][j] = 0;
 			t[1][j] = RGB(b / 6, 0, b);
 		}
-		made = 1;
+		bg_made_for = ui_wall;
 	}
 	return t[home ? 1 : 0][y < 0 ? 0 : y >= H ? H - 1 : y];
 }
 
 static void bg_fill(int x, int y, int w, int h, int home)
 {
-	for (int j = y; j < y + h; j++) gfx_fill(x, j, w, 1, bg_row(j, home));
+	bg_row(0, home);	/* (re)builds the tables */
+	if (ui_wall <= 0 || ui_wall >= WALL_COUNT) {
+		for (int j = y; j < y + h; j++) gfx_fill(x, j, w, 1, bg_row(j, home));
+		return;
+	}
+	if (x < 0) { w += x; x = 0; }
+	if (y < 0) { h += y; y = 0; }
+	if (x + w > W) w = W - x;
+	if (y + h > H) h = H - y;
+	for (int j = y; j < y + h; j++) {
+		const uint16_t *d = wall_dither[j];
+		uint16_t *p = fb + j * W;
+		for (int i = x; i < x + w; i++) p[i] = d[i & 3];
+	}
 }
 
 /* "lighten" blend: per channel max. Sony's home frames (and the ring) are glows pre-composited on black; drawn
@@ -280,9 +324,11 @@ void scr_screen(const char *title)
  * a home redraw cost 8 ms at 248 MHz) */
 static uint16_t cell_cache[HOME_SLOTS][HOME_CELL_W * HOME_CELL_H];
 static unsigned char cell_cached[HOME_SLOTS];
+void scr_wall_changed(void) { memset(cell_cached, 0, sizeof cell_cached); }
 
 static void home_cell(int i, int frame)
 {
+	home_src_init();
 	int f = frame < 0 ? 0 : frame > 8 ? 8 : frame;
 	int x = HOME_CELL_X(i), y = HOME_CELL_Y(i);
 	if (f == 8 && cell_cached[i]) {
@@ -291,7 +337,7 @@ static void home_cell(int i, int frame)
 	}
 	bg_fill(x, y, HOME_CELL_W, HOME_CELL_H, 1);
 	struct img ic = { 0, 0, 0 };
-	if (home_src[i] >= 100) ic = gfx_anim(home_src[i] - 100 + f);
+	if (home_src[i] >= 100) ic = gfx_anim(home_src[i] - 100 + (gfx_anim_intl() ? 8 - f : f));
 	if (!ic.w) { ic.w = 80; ic.h = 72; ic.px = home_anim[home_fallback[i]][f]; }
 	blit_home(ic, x, y);
 	if (f == 8) {
@@ -305,10 +351,11 @@ int ui_pod_new;
 /* number badge over the top-right corner of the Podcasts icon (drawn after the cell, never cached) */
 static void home_badge(int i)
 {
+	home_src_init();
 	if (i != 2 || ui_pod_new <= 0) return;
 	static int bx = -1, by;
 	if (bx < 0) {	/* the corner of the icon's lit pixels, measured once on Sony's resting frame */
-		struct img im = home_src[i] >= 100 ? gfx_anim(home_src[i] - 100 + 8) : (struct img){ 0, 0, 0 };
+		struct img im = home_src[i] >= 100 ? gfx_anim(home_src[i] - 100 + (gfx_anim_intl() ? 0 : 8)) : (struct img){ 0, 0, 0 };
 		int x1 = 60, y0 = 12;
 		if (im.w) {
 			x1 = 0; y0 = im.h;
@@ -334,6 +381,7 @@ static void home_badge(int i)
 
 void scr_home_icon(int i, int frame)
 {
+	home_src_init();
 	if (i < 0 || i >= HOME_SLOTS || home_src[i] < 0) return;
 	home_cell(i, frame);
 	home_badge(i);

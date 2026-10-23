@@ -5,12 +5,12 @@ translated (names of things, sample data, text never shown)."""
 import glob, os, re, subprocess
 
 IGNORE = {
-    'Walkman NW-A829 homebrew', 'Game Boy', 'Game Boy Advance', 'Bluetooth', 'Podcast', 'Podcasts', 'DSP', 'NES', 'GBA', 'Doom',
+    'Game Boy', 'Game Boy Advance', 'Bluetooth', 'Podcast', 'Podcasts', 'DSP', 'NES', 'GBA', 'Doom',
     'Info', 'Hold', 'Preset', 'Crossfeed', 'OK', 'Heavy', 'Pop', 'Jazz', 'Español', 'English', 'Idioma / Language',
     'Argentina', 'Chile', 'Colombia', 'Uruguay', 'México', 'España', 'Brasil', 'Estados Unidos', 'Reino Unido',
     'canciones', 'canción', 'episodio', 'episodios', 'una', 'todo', 'Máxima batería off',	# pieces of composed texts
     '%s%d episodio%s%s%s', '%s%s%d episodio%s', '%s%sen el Walkman', 'Lo seguís · ', 'Repetir: %s',	# composed at run time (unit.c checks the results)
-    'Mbed TLS · Sonic · TJpgDec', 'libmad · FAAD2 · gnuboy · lwIP', 'MP3 · FLAC · AAC · EQ · Bluetooth', 'Game Boy · NES · Doom',
+    'libmad · FAAD2 · lwIP', 'gnuboy · Sonic', 'Mbed TLS · TJpgDec', 'NW-A820 homebrew', 'NWZ-A820 homebrew', 'MP3 · FLAC · AAC · EQ · Bluetooth', 'Game Boy · NES · Doom',
 }
 SPANISH = re.compile(r'[áéíóúñÁÉÍÓÚÑ¿¡]|\b(de|del|con|para|los|las|el|la|y|no|sí|en|un|una|que|tu|tus|hay|ya|más|sin|por)\b|'
                      r'\b(Buscar|Volver|Bajar|Borrar|Cancelar|Seguir|Ver|Leyendo|Abriendo|Ajustes|Apagar|Sonido|Pantalla|Despertador|'

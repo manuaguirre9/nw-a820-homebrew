@@ -171,6 +171,9 @@ static unsigned rd16(const unsigned char *p) { return p[0] | p[1] << 8; }
 static const unsigned char *fsub;
 static unsigned ffirst, flast, fmtab, fbmp;
 
+static int anim_intl;
+int gfx_anim_intl(void) { return anim_intl; }
+
 int gfx_load_res(const char *resdir)
 {
 	char p[512];
@@ -181,6 +184,7 @@ int gfx_load_res(const char *resdir)
 	if (!animdata) {	/* international NWZ-A82x: same layout, its own icons */
 		snprintf(p, sizeof p, "%s/dui_tex/ICX1113_home_anim.dpk", resdir);
 		animdata = map_file(p, &animlen);
+		anim_intl = animdata != NULL;
 	}
 	snprintf(p, sizeof p, "%s/font/dui_font.dpk", resdir);
 	fontdata = map_file(p, &fontlen);

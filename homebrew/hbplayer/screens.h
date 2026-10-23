@@ -56,6 +56,10 @@ struct list_view {
 static inline int lv_rows(const struct list_view *v) { return v->grid ? GRID_N : v->ep ? EP_ROWS : v->big ? BIG_ROWS : LIST_ROWS; }
 static inline int lv_rowh(const struct list_view *v) { return v->ep ? EP_ROW_H : v->big ? BIG_ROW_H : LIST_ROW_H; }
 extern int ui_big_rows;		/* setting: lists with covers use big rows */
+#define WALL_COUNT 6
+extern int ui_wall;
+extern const char *const wall_names[WALL_COUNT];
+void scr_wall_changed(void);
 extern int ui_album_grid;	/* setting: album lists as a mosaic of covers (OPTION in the album list) */
 extern int ui_pod_new;		/* home: episodes found by the last search and still to download (badge on Podcasts) */
 

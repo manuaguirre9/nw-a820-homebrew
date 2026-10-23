@@ -47,6 +47,7 @@ static const struct tr tab[] = {
 	/* settings */
 	{ "Sonido", "Sound" }, { "Pantalla", "Display" }, { "Despertador", "Alarm" }, { "Pitido", "Beep" }, { "Acerca de", "About" },
 	{ "Idioma", "Language" }, { "Restablecer", "Reset" }, { "Brillo", "Brightness" }, { "Apagar pantalla", "Screen off after" },
+	{ "Sony (negro)", "Sony" }, { "Azul noche", "Navy" }, { "Verde", "Green" }, { "Violeta", "Violet" }, { "Vino", "Wine" }, { "Gris", "Grey" },
 	{ "Filas grandes con portada", "Big rows with covers" }, { "máx. batería", "max. battery" }, { "efectos", "effects" },
 	{ "Hora", "Time" }, { "Sonar con", "Ring with" }, { "lo último", "last played" }, { "activado", "on" }, { "apagado", "off" }, { "campanas", "bells" }, { "personal", "custom" }, { "procesado", "processed" }, { "ecualizador", "equalizer" }, { "crossfeed", "crossfeed" },
 	{ "izq/der: horas / minutos", "left/right: h / min" }, { "arriba/abajo: cambiar", "up/down: change" },
@@ -77,7 +78,7 @@ static const struct tr tab[] = {
 	{ "Fondo", "Background" }, { "ruido blanco", "white noise" }, { "ruido rosa", "pink noise" }, { "ruido marrón", "brown noise" },
 	{ "campana al inicio y al final", "bell at start and end" }, { "campana cada %d min", "bell every %d min" },
 	{ "inicio/fin", "start/end" }, { "Tiempo ahorrado (sesión)", "Time saved (this session)" }, { "Sesión terminada.", "Session finished." },
-	{ "Walkman NW-A829 homebrew", "Walkman NW-A829 homebrew" }, { "HOME 3 s: volver a Sony", "HOME 3 s: back to Sony" },
+	{ "HOME 3 s: volver a Sony", "HOME 3 s: back to Sony" },
 	{ "Info", "Info" },
 	/* Bluetooth */
 	{ "Bluetooth: apagado", "Bluetooth: off" }, { "Bluetooth: encendido", "Bluetooth: on" }, { "BT: %s", "BT: %s" },
@@ -175,7 +176,7 @@ static const struct tr tab[] = {
 	{ "El despertador no suena con el equipo apagado del todo.", "The alarm can't ring when the unit is fully off." },
 	{ "Usá Suspender para que suene.", "Use Sleep so it rings." },
 	{ "Biblioteca: se muestran %d canciones (máximo).", "Library: showing %d songs (the maximum)." },
-	{ "Versión %s", "Version %s" }, { "Libre: %s · ajustes %s", "Free: %s · settings %s" }, { "silencio", "silence" },
+	{ "Versión %s", "Version %s" }, { "Libre: %s", "Free: %s" }, { "Ajustes: %s", "Settings: %s" }, { "HOME 3 s: ir a Sony", "HOME 3 s: to Sony" }, { "silencio", "silence" },
 	{ "Idioma / Language", "Idioma / Language" },
 	{ "Walkman de Sony: ahorro", "Sony Walkman: power saving" },
 	{ "El Walkman de Sony va a usar la mitad de reloj: menos baterí" "a, menú" "s más lentos.", "Sony's Walkman will run at half the clock: less battery, slower menus." },
