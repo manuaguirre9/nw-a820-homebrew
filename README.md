@@ -189,7 +189,9 @@ flashed from a Mac, and the player starts and plays music. `firmware/install_mac
 
 Same MP201 SoC, kernel 2.6.10 and libc as the A82x, so the A82x binaries run as they are. The A91x has **no
 Bluetooth** (the Bluetooth features and podcast downloads on the device don't work; `podsync` from the computer does)
-and different DSP and kernel module builds.
+and different DSP and kernel module builds. On the tested NW-A919 the DSP's direct MP3 mode does not start
+(`dsp: helper did not start`), so the player falls back to decoding on the ARM: music plays, at some battery cost.
+USB hand-over in the player works. The battery percentage uses the A82x curve and may be off.
 
 ```sh
 sudo VENV/bin/python firmware/install_mac_a910.py --check      # read-only: model, firmware, MD5s
