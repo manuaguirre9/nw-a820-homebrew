@@ -170,6 +170,37 @@ connected and press **Save report** (it only reads information and changes nothi
 on your Desktop and offers to open the [report form](https://github.com/manuaguirre9/nw-a820-homebrew/issues/new?template=walkman-report.yml);
 drag the file into it.
 
+## macOS and the NW-A91x (NW-A916/A918/A919)
+
+**macOS**: `firmware/install_mac.py` does what `install.py` does, with the same MD5 checks: the SCSI commands go over
+USB Bulk-Only Transport with libusb (so it runs with `sudo`), and the CAB is extracted with `tar`. It needs a Python
+venv with `pyusb`, `libusb-package` and `cryptography`.
+
+**NW-A91x** (2008 Japanese models with 1seg). **Status: experimental, works on one NW-A919**: the hook firmware
+flashed from a Mac, and the player starts and plays music. `firmware/install_mac_a910.py`:
+
+- downloads Sony's `NW-A910_V1_03.exe` and takes `NW_A91X.UPG` out of it (the A91x's updater looks for that name,
+  not `NW_WM_FW.UPG`);
+- decrypts it with key `b8442b44`, signature `5dfeff3c` (not in Rockbox's database; found with a known-plaintext
+  search over the 9^8 DES-equivalent hex keys, about 2 minutes on 8 cores);
+- builds the same hook as `build_hb.py` on the 1.03 rootfs (the device reports **1.03-41**) and checks that only
+  `/etc/init.d/gemini` and `/etc/firmversion` change;
+- stage 1 installs a diagnostic `boot.sh` (hardware info to `HB/out/diag.txt`), `--full` the whole homebrew.
+
+Same MP201 SoC, kernel 2.6.10 and libc as the A82x, so the A82x binaries run as they are. The A91x has **no
+Bluetooth** (the Bluetooth features and podcast downloads on the device don't work; `podsync` from the computer does)
+and different DSP and kernel module builds. On the tested NW-A919 the DSP's direct MP3 mode does not start
+(`dsp: helper did not start`), so the player falls back to decoding on the ARM: music plays, at some battery cost.
+USB hand-over in the player works. The battery percentage uses the A82x curve and may be off.
+
+```sh
+sudo VENV/bin/python firmware/install_mac_a910.py --check      # read-only: model, firmware, MD5s
+sudo VENV/bin/python firmware/install_mac_a910.py --firmware   # older than 1.03: Sony's official 1.03 first
+sudo VENV/bin/python firmware/install_mac_a910.py              # hook firmware + diagnostics
+sudo VENV/bin/python firmware/install_mac_a910.py --full       # the homebrew
+sudo VENV/bin/python firmware/install_mac_a910.py --uninstall  # Sony's official 1.03 back
+```
+
 ## Repository layout
 
 | Path | Content |
